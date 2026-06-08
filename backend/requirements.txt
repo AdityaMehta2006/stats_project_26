@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.36
+pandas-datareader>=0.10.0
+statsmodels>=0.14.0
+arch>=6.0.0
+scipy>=1.11.0
