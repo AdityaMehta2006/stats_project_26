@@ -10,12 +10,14 @@ import Dashboard from "./components/Dashboard";
 import MacroRegression from "./components/MacroRegression";
 import GarchVolatility from "./components/GarchVolatility";
 import PairTrading from "./components/PairTrading";
+import Icon from "./components/common/Icon";
+import BgPattern from "./components/common/BgPattern";
 
 const TABS = [
-  { id: "overview", label: "Overview" },
-  { id: "macro", label: "Macro Regression" },
-  { id: "garch", label: "GARCH Volatility" },
-  { id: "pairs", label: "Pair Trading" },
+  { id: "overview", label: "Overview", icon: "layers" },
+  { id: "macro", label: "Macro Regression", icon: "trendingUp" },
+  { id: "garch", label: "GARCH Volatility", icon: "activity" },
+  { id: "pairs", label: "Pair Trading", icon: "exchange" },
 ];
 
 export default function App() {
@@ -36,13 +38,17 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Header */}
+      <BgPattern />
       <header className="header">
         <div className="header-inner">
           <div className="header-brand">
-            <div className="header-logo">QA</div>
+            <div className="header-logo">
+              <Icon name="logo" size={22} strokeWidth={1.8} />
+            </div>
             <div>
-              <div className="header-title">QuantAnomalies</div>
+              <div className="header-title">
+                Quant<span className="accent">Anomalies</span>
+              </div>
               <div className="header-subtitle">Financial Markets Analysis</div>
             </div>
           </div>
@@ -53,14 +59,14 @@ export default function App() {
                 className={`nav-tab ${activeTab === tab.id ? "active" : ""}`}
                 onClick={() => setActiveTab(tab.id)}
               >
-                {tab.label}
+                <Icon name={tab.icon} size={16} />
+                <span className="tab-label">{tab.label}</span>
               </button>
             ))}
           </nav>
         </div>
       </header>
 
-      {/* Main content */}
       <main className="main-content">{renderPanel()}</main>
     </div>
   );

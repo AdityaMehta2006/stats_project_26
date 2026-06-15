@@ -61,9 +61,9 @@ export default function ForexPairSelector({ selectedPairs, onPairsChange }) {
               fontSize: "0.72rem",
               fontWeight: 600,
               fontFamily: "var(--font-mono)",
-              background: "rgba(168,85,247,0.12)",
-              color: "#c084fc",
-              border: "1px solid rgba(168,85,247,0.25)",
+              background: "rgba(167,139,250,0.14)",
+              color: "#A78BFA",
+              border: "1px solid rgba(167,139,250,0.32)",
               cursor: "pointer",
               transition: "all 0.2s ease",
             }}
@@ -135,7 +135,7 @@ export default function ForexPairSelector({ selectedPairs, onPairsChange }) {
                     padding: "6px 10px",
                     borderRadius: "var(--radius-sm)",
                     cursor: "pointer",
-                    background: isSelected ? "rgba(168,85,247,0.08)" : "transparent",
+                    background: isSelected ? "rgba(167,139,250,0.1)" : "transparent",
                     transition: "background 0.15s ease",
                   }}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
@@ -145,12 +145,12 @@ export default function ForexPairSelector({ selectedPairs, onPairsChange }) {
                     fontFamily: "var(--font-mono)",
                     fontSize: "0.8rem",
                     fontWeight: isSelected ? 600 : 400,
-                    color: isSelected ? "#c084fc" : "var(--text-secondary)",
+                    color: isSelected ? "#A78BFA" : "var(--text-secondary)",
                   }}>
                     {p.label}
                   </span>
                   {isSelected && (
-                    <span style={{ color: "#a855f7", fontSize: "0.85rem" }}>✓</span>
+                    <span style={{ color: "#A78BFA", fontSize: "0.85rem" }}>✓</span>
                   )}
                 </div>
               );

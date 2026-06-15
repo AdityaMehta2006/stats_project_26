@@ -170,11 +170,62 @@ def get_oil() -> pd.DataFrame:
 
 def _download_fred(series_id: str, name: str) -> pd.DataFrame:
     """Download a FRED series with retry logic."""
+    import io
     import time
+
+    # FRED's public CSV endpoint rejects the default Python-urllib User-Agent
+    # with HTTP 403, so we must send a browser-like UA. requests is already
+    # patched above to skip SSL verification (Anaconda cert workaround).
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+    url = (
+        f"https://fred.stlouisfed.org/graph/fredgraph.csv"
+        f"?id={series_id}&cosd={START}&coed={END}"
+    )
 
     def _dl():
         errors = []
-        # Method 1: pandas_datareader (uses requests — patched for SSL)
+        # Method 1: direct CSV from FRED via requests with a browser UA (with retries)
+        for attempt in range(3):
+            try:
+                resp = _requests.get(url, headers=headers, timeout=30)
+                resp.raise_for_status()
+                # FRED encodes missing observations as "." — treat as NaN.
+                df = pd.read_csv(
+                    io.StringIO(resp.text),
+                    index_col=0,
+                    parse_dates=True,
+                    na_values=["."],
+                )
+                df.columns = [series_id]
+                df[series_id] = pd.to_numeric(df[series_id], errors="coerce")
+                df = df.dropna()
+                if len(df) > 0:
+                    return df
+                errors.append(f"csv attempt {attempt}: empty after parse")
+            except Exception as e:
+                errors.append(f"csv attempt {attempt}: {e}")
+                time.sleep(2 ** attempt)
+
+        # Method 2: DBnomics — free FRED mirror, no API key, JSON API.
+        try:
+            db_url = f"https://api.db.nomics.world/v22/series/FRED/{series_id}?observations=1"
+            resp = _requests.get(db_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            doc = resp.json()["series"]["docs"][0]
+            s = pd.Series(doc["value"], index=pd.to_datetime(doc["period"]))
+            s = pd.to_numeric(s, errors="coerce").dropna()
+            s = s[(s.index >= START) & (s.index <= END)]
+            if len(s) > 0:
+                return s.to_frame(series_id)
+        except Exception as e:
+            errors.append(f"dbnomics: {e}")
+
+        # Method 3: pandas_datareader fallback
         try:
             from pandas_datareader import data as pdr
             df = pdr.DataReader(series_id, "fred", START, END)
@@ -183,22 +234,7 @@ def _download_fred(series_id: str, name: str) -> pd.DataFrame:
         except Exception as e:
             errors.append(f"pdr: {e}")
 
-        # Method 2: direct CSV from FRED (with retries)
-        for attempt in range(3):
-            try:
-                url = (
-                    f"https://fred.stlouisfed.org/graph/fredgraph.csv"
-                    f"?id={series_id}&cosd={START}&coed={END}"
-                )
-                df = pd.read_csv(url, index_col=0, parse_dates=True)
-                df.columns = [series_id]
-                if len(df) > 0:
-                    return df
-            except Exception as e:
-                errors.append(f"csv attempt {attempt}: {e}")
-                time.sleep(2 ** attempt)
-
-        raise ValueError(f"Could not download FRED series '{series_id}': {'; '.join(errors[-2:])}")
+        raise ValueError(f"Could not download FRED series '{series_id}': {'; '.join(errors[-3:])}")
 
     return _load_or_download(name, _dl)
 
@@ -214,8 +250,29 @@ def get_cpi() -> pd.DataFrame:
 
 
 def get_treasury_10y_fred() -> pd.DataFrame:
-    """10-Year Treasury Constant Maturity Rate (daily) from FRED."""
-    return _download_fred("DGS10", "treasury_10y_fred")
+    """
+    10-Year Treasury yield (daily), returned as a single 'Treasury10Y' column.
+
+    Primary source is Yahoo Finance ^TNX (CBOE 10-Year T-Note Yield) because it
+    rides our reliable yfinance pipeline. FRED's daily DGS10 endpoint is prone to
+    504s, so it is only used as a fallback if Yahoo returns nothing.
+    """
+    # Primary: Yahoo ^TNX
+    try:
+        tnx = get_equity_data("^TNX")["Close"].dropna()
+        if len(tnx) > 0:
+            df = tnx.to_frame("Treasury10Y")
+            # ^TNX is quoted directly in percent (e.g. 4.25). Guard against the
+            # occasional ×10 quoting convention so the yield stays realistic.
+            if df["Treasury10Y"].median() > 25:
+                df = df / 10.0
+            return df
+    except Exception:
+        pass
+    # Fallback: FRED DGS10
+    df = _download_fred("DGS10", "treasury_10y_fred")
+    df.columns = ["Treasury10Y"]
+    return df
 
 
 def get_unemployment() -> pd.DataFrame:
@@ -252,7 +309,7 @@ ALL_FOREX_PAIRS = {
     "USDTRY": "USDTRY=X", "USDNOK": "USDNOK=X", "USDSEK": "USDSEK=X",
     "USDDKK": "USDDKK=X", "USDPLN": "USDPLN=X", "USDHUF": "USDHUF=X",
     "USDCZK": "USDCZK=X", "USDTHB": "USDTHB=X", "USDKRW": "USDKRW=X",
-    "USDTWD": "USDTWD=X", "USDCNY": "USDCNY=X", "USDBRL": "USDTRY=X",
+    "USDTWD": "USDTWD=X", "USDCNY": "USDCNY=X", "USDBRL": "USDBRL=X",
 }
 
 
@@ -292,61 +349,69 @@ def get_forex(pair_labels: list = None) -> pd.DataFrame:
         reverse_map = {v: k for k, v in pairs_map.items()}
         close.columns = [reverse_map.get(c, c) for c in close.columns]
         return close
-    return _load_or_download(cache_key, _dl)
+    df = _load_or_download(cache_key, _dl)
+    # Drop any pair that came back entirely empty (e.g. a ticker yfinance
+    # failed to fetch). Otherwise a single dead column makes the downstream
+    # .dropna() wipe out every row, leaving an empty frame.
+    df = df.dropna(axis=1, how="all")
+    return df
 
 
 # ---------------------------------------------------------------------------
 # Composite dataset builders — dynamic ticker support
 # ---------------------------------------------------------------------------
 
+def _monthly_log_return(ticker: str) -> pd.Series:
+    """Monthly log return of a Yahoo ticker's Close price."""
+    px = get_equity_data(ticker)["Close"].resample("ME").last()
+    return np.log(px / px.shift(1)).dropna()
+
+
 def build_macro_dataset(ticker: str = "^GSPC") -> pd.DataFrame:
     """
-    Build a monthly-frequency dataset for any equity ticker:
-      - Ticker monthly log return
-      - VIX monthly average
-      - Oil monthly return
-      - Fed Funds Rate
-      - CPI monthly % change (inflation proxy)
-      - 10Y Treasury yield
-      - Unemployment rate
+    Build a monthly-frequency dataset for any equity ticker.
+
+    Each macro factor is fetched defensively: if a single data source is
+    unavailable, that factor is skipped (with a log line) rather than failing
+    the whole dataset. Only the equity return is mandatory.
+
+    Factors:
+      - VIX monthly average            (Yahoo)
+      - Oil monthly return             (Yahoo, CL=F)
+      - Gold monthly return            (Yahoo, GC=F)
+      - US Dollar Index monthly return (Yahoo, DX-Y.NYB)
+      - 10Y Treasury yield             (Yahoo ^TNX, FRED DGS10 fallback)
+      - Fed Funds Rate                 (FRED)
+      - CPI monthly % change           (FRED, inflation proxy)
+      - Unemployment rate              (FRED)
     """
-    # Equity monthly returns
-    eq = get_equity_data(ticker)["Close"].resample("ME").last()
-    eq_ret = np.log(eq / eq.shift(1)).dropna()
+    # Equity monthly returns (required)
+    eq_ret = _monthly_log_return(ticker)
     eq_ret.name = "Equity_Return"
+    frames = [eq_ret]
 
-    # VIX monthly average
-    vix = get_vix()["Close"].resample("ME").mean()
-    vix.name = "VIX"
+    def _add(name: str, fn):
+        try:
+            s = fn()
+            s.name = name
+            frames.append(s)
+        except Exception as e:  # noqa: BLE001 — skip any factor that won't load
+            print(f"[build_macro_dataset] skipping factor '{name}': {e}")
 
-    # Oil monthly return
-    oil = get_oil()["Close"].resample("ME").last()
-    oil_ret = np.log(oil / oil.shift(1)).dropna()
-    oil_ret.name = "Oil_Return"
+    # Market factors (Yahoo Finance)
+    _add("VIX",           lambda: get_vix()["Close"].resample("ME").mean())
+    _add("Oil_Return",    lambda: _monthly_log_return("CL=F"))
+    _add("Gold_Return",   lambda: _monthly_log_return("GC=F"))
+    _add("Dollar_Return", lambda: _monthly_log_return("DX-Y.NYB"))
+    _add("Treasury10Y",   lambda: get_treasury_10y_fred().resample("ME").last().iloc[:, 0])
 
-    # FRED series (already monthly or daily → resample)
-    ffr = get_fed_funds_rate()
-    ffr = ffr.resample("ME").last()
-    ffr.columns = ["FedFunds"]
+    # Macro factors (FRED)
+    _add("FedFunds",      lambda: get_fed_funds_rate().resample("ME").last().iloc[:, 0])
+    _add("CPI_Change",    lambda: get_cpi().resample("ME").last().pct_change(fill_method=None).dropna().iloc[:, 0])
+    _add("Unemployment",  lambda: get_unemployment().resample("ME").last().iloc[:, 0])
 
-    cpi = get_cpi()
-    cpi = cpi.resample("ME").last()
-    cpi_chg = cpi.pct_change().dropna()
-    cpi_chg.columns = ["CPI_Change"]
-
-    t10y = get_treasury_10y_fred()
-    t10y = t10y.resample("ME").last()
-    t10y.columns = ["Treasury10Y"]
-
-    unemp = get_unemployment()
-    unemp = unemp.resample("ME").last()
-    unemp.columns = ["Unemployment"]
-
-    # Merge all
-    df = pd.concat(
-        [eq_ret, vix, oil_ret, ffr, cpi_chg, t10y, unemp],
-        axis=1, join="inner"
-    )
+    # Merge all available factors on common dates
+    df = pd.concat(frames, axis=1, join="inner")
     df.dropna(inplace=True)
     return df
 

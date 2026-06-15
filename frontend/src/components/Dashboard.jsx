@@ -5,10 +5,11 @@
  */
 
 import { motion } from "framer-motion";
+import Icon from "./common/Icon";
 
 const container = {
   hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.12 } },
+  show: { opacity: 1, transition: { staggerChildren: 0.1 } },
 };
 const item = {
   hidden: { opacity: 0, y: 20 },
@@ -18,41 +19,54 @@ const item = {
 const PILLARS = [
   {
     id: "macro",
-    icon: "📈",
+    icon: "trendingUp",
     iconClass: "macro",
     title: "Macro Factor & Lag Regression",
     description:
-      "Analyze how macroeconomic variables (Fed Funds Rate, CPI, VIX, Oil) explain equity returns using OLS regression with time lags and Granger causality tests.",
-    tags: ["OLS Regression", "Granger Causality", "Lagged Correlation", "VAR"],
+      "Measures how macroeconomic forces — interest rates, inflation, the VIX, oil, gold and the dollar — move equity returns, and crucially with what time delay. Uses OLS regression with lags and Granger-causality tests.",
+    tags: ["OLS Regression", "Granger Causality", "Lagged Correlation"],
   },
   {
     id: "garch",
-    icon: "🌊",
+    icon: "activity",
     iconClass: "garch",
     title: "GARCH & Volatility Clustering",
     description:
-      "Model time-varying volatility using GARCH(1,1), detect fat tails with QQ plots, and confirm volatility clustering via autocorrelation of squared returns.",
-    tags: ["GARCH(1,1)", "Volatility Clustering", "Fat Tails", "Ljung-Box Test"],
+      "Models how risk itself changes over time. Fits a GARCH(1,1) model to capture volatility clustering (calm and turbulent regimes) and tests whether returns have the fat tails that a normal distribution misses.",
+    tags: ["GARCH(1,1)", "Volatility Clustering", "Fat Tails"],
   },
   {
     id: "pairs",
-    icon: "💱",
+    icon: "exchange",
     iconClass: "pairs",
     title: "Forex Pair Trading",
     description:
-      "Identify cointegrated forex pairs using Engle-Granger tests, construct mean-reverting spreads, and generate z-score based trading signals.",
-    tags: ["Cointegration", "Z-Score", "Mean Reversion", "Half-Life"],
+      "Finds currency pairs whose prices move together long-term (cointegration), builds a mean-reverting spread, and generates z-score entry/exit signals — the basis of a statistical-arbitrage strategy.",
+    tags: ["Cointegration", "Z-Score", "Mean Reversion"],
   },
+];
+
+const FEATURES = [
+  { label: "Any Ticker", icon: "search", desc: "Stocks, indices, crypto" },
+  { label: "Live Data", icon: "database", desc: "Yahoo Finance + FRED" },
+  { label: "10Y History", icon: "calendar", desc: "2015 – 2025 daily" },
+  { label: "40+ FX Pairs", icon: "globe", desc: "Pick any combination" },
 ];
 
 export default function Dashboard({ onNavigate }) {
   return (
     <motion.div variants={container} initial="hidden" animate="show">
       <motion.div className="dashboard-hero" variants={item}>
-        <h1>Quantitative Anomalies in Financial Markets</h1>
+        <div className="hero-eyebrow">
+          <Icon name="activity" size={13} /> Quantitative Research Dashboard
+        </div>
+        <h1>
+          Quantitative Anomalies in <span className="accent">Financial Markets</span>
+        </h1>
         <p>
-          A statistical analysis of volatility, factor risk, and lagged transmission
-          across equity and forex markets — powered by Python and React.
+          A statistical study of volatility, factor risk, and lagged transmission across
+          equity and forex markets — three classic effects that break the assumptions of
+          textbook finance, modelled live with Python and visualised in React.
         </p>
       </motion.div>
 
@@ -62,12 +76,17 @@ export default function Dashboard({ onNavigate }) {
             key={pillar.id}
             className="pillar-card"
             variants={item}
-            whileHover={{ scale: 1.01 }}
+            whileHover={{ scale: 1.005 }}
             whileTap={{ scale: 0.99 }}
             onClick={() => onNavigate(pillar.id)}
           >
-            <div className={`pillar-icon ${pillar.iconClass}`}>{pillar.icon}</div>
-            <h3>{pillar.title}</h3>
+            <div className={`pillar-icon ${pillar.iconClass}`}>
+              <Icon name={pillar.icon} size={24} />
+            </div>
+            <h3>
+              {pillar.title}
+              <Icon name="arrowRight" size={18} className="go-arrow" />
+            </h3>
             <p>{pillar.description}</p>
             <div className="pillar-tags">
               {pillar.tags.map((tag) => (
@@ -78,30 +97,16 @@ export default function Dashboard({ onNavigate }) {
         ))}
       </motion.div>
 
-      <motion.div variants={item} style={{ marginTop: "3rem", textAlign: "center" }}>
-        <div style={{
-          display: "inline-flex",
-          flexWrap: "wrap",
-          gap: "1.5rem",
-          justifyContent: "center",
-          padding: "1.5rem 2rem",
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-lg)",
-        }}>
-          {[
-            { label: "Any Ticker", icon: "🔍", desc: "Search any stock, index, crypto" },
-            { label: "Real-Time Data", icon: "📊", desc: "Yahoo Finance + FRED" },
-            { label: "10Y History", icon: "📅", desc: "2015 – 2025 daily data" },
-            { label: "Dynamic Forex", icon: "💹", desc: "40+ currency pairs" },
-          ].map((f) => (
-            <div key={f.label} style={{ textAlign: "center", minWidth: 120 }}>
-              <div style={{ fontSize: "1.5rem", marginBottom: 4 }}>{f.icon}</div>
-              <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-primary)" }}>{f.label}</div>
-              <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>{f.desc}</div>
+      <motion.div className="feature-strip" variants={item}>
+        {FEATURES.map((f) => (
+          <div key={f.label} className="feature-item">
+            <div className="feature-ico"><Icon name={f.icon} size={18} /></div>
+            <div>
+              <div className="feature-label">{f.label}</div>
+              <div className="feature-desc">{f.desc}</div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </motion.div>
     </motion.div>
   );

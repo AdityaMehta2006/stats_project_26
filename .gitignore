@@ -26,6 +26,9 @@ frontend/dist-ssr/
 frontend/.vite/
 *.local
 
+# Downloaded market-data caches (regenerated from Yahoo/FRED on first run)
+backend/data/raw/*.csv
+
 # Logs
 *.log
 npm-debug.log*
@@ -33,6 +36,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Secrets / environment (e.g. ANTHROPIC_API_KEY for the decision engine)
+.env
+.env.*
+!.env.example
 
 # OS / editor files
 .DS_Store

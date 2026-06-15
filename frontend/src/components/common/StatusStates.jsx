@@ -1,10 +1,11 @@
 /**
- * LoadingState.jsx / ErrorState.jsx
- * ----------------------------------
+ * StatusStates.jsx
+ * ----------------
  * Reusable loading and error display components.
  */
 
 import { motion } from "framer-motion";
+import Icon from "./Icon";
 
 export function LoadingState({ message = "Crunching the numbers…", subtext = "Fetching data from the analysis engine" }) {
   return (
@@ -29,14 +30,14 @@ export function ErrorState({ title = "Something went wrong", message, onRetry })
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
     >
-      <div className="error-icon">⚠️</div>
+      <div className="error-icon"><Icon name="alert" size={28} /></div>
       <div className="error-title">{title}</div>
       <div className="error-message">
         {message || "Could not connect to the analysis backend. Make sure the server is running on port 8000."}
       </div>
       {onRetry && (
         <button className="retry-button" onClick={onRetry}>
-          Try Again
+          <Icon name="refresh" size={15} /> Try Again
         </button>
       )}
     </motion.div>

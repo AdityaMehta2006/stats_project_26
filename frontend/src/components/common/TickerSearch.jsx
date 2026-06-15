@@ -7,6 +7,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { searchTickers } from "../../api";
+import Icon from "./Icon";
 
 const POPULAR_TICKERS = [
   { ticker: "^GSPC", name: "S&P 500", type: "INDEX" },
@@ -105,12 +106,12 @@ export default function TickerSearch({ value, onSelect, label = "Ticker" }) {
   };
 
   const typeColors = {
-    EQUITY: "#10b981",
-    INDEX: "#6366f1",
-    ETF: "#06b6d4",
-    FUTURE: "#f59e0b",
-    CRYPTOCURRENCY: "#a855f7",
-    CURRENCY: "#ec4899",
+    EQUITY: "#34D399",
+    INDEX: "#2DD4BF",
+    ETF: "#38BDF8",
+    FUTURE: "#FBBF24",
+    CRYPTOCURRENCY: "#A78BFA",
+    CURRENCY: "#F472B6",
   };
 
   return (
@@ -137,16 +138,18 @@ export default function TickerSearch({ value, onSelect, label = "Ticker" }) {
           transition: "border-color 0.2s ease",
           borderColor: isOpen ? "var(--border-active)" : "var(--border-subtle)",
         }}>
-          <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginRight: 6 }}>🔍</span>
+          <span style={{ color: "var(--text-muted)", display: "inline-flex", marginRight: 8 }}>
+            <Icon name="search" size={15} />
+          </span>
           {value && !isOpen && (
             <span style={{
               padding: "4px 10px",
-              background: "rgba(99,102,241,0.15)",
-              border: "1px solid rgba(99,102,241,0.3)",
+              background: "rgba(45,212,191,0.14)",
+              border: "1px solid rgba(45,212,191,0.32)",
               borderRadius: 999,
               fontSize: "0.78rem",
               fontWeight: 600,
-              color: "#818cf8",
+              color: "var(--accent-primary)",
               fontFamily: "var(--font-mono)",
               marginRight: 6,
               cursor: "pointer",
@@ -253,9 +256,9 @@ export default function TickerSearch({ value, onSelect, label = "Ticker" }) {
                   fontWeight: 600,
                   padding: "2px 8px",
                   borderRadius: 999,
-                  background: `${typeColors[r.type] || "#64748b"}18`,
-                  color: typeColors[r.type] || "#64748b",
-                  border: `1px solid ${typeColors[r.type] || "#64748b"}30`,
+                  background: `${typeColors[r.type] || "#5E6B7E"}18`,
+                  color: typeColors[r.type] || "#5E6B7E",
+                  border: `1px solid ${typeColors[r.type] || "#5E6B7E"}30`,
                   whiteSpace: "nowrap",
                   textTransform: "uppercase",
                   letterSpacing: "0.04em",

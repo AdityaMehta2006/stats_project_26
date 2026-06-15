@@ -6,7 +6,7 @@
  * correlation heatmap, and macro time series.
  */
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,8 +16,9 @@ import useApiData from "../hooks/useApiData";
 import { getMacroOLS, getMacroGranger, getMacroHeatmap, getMacroTimeSeries } from "../api";
 import { LoadingState, ErrorState } from "./common/StatusStates";
 import TickerSearch from "./common/TickerSearch";
-
-const COLORS = ["#6366f1", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#a855f7", "#ec4899"];
+import Icon from "./common/Icon";
+import { InfoTip, LabelWithTip } from "./common/Tooltip";
+import { CHART, SERIES, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 
 const container = {
   hidden: { opacity: 0 },
@@ -42,15 +43,27 @@ export default function MacroRegression() {
   return (
     <motion.div variants={container} initial="hidden" animate="show">
       <motion.div className="section-header" variants={item}>
-        <h2>📈 Macro Factor & Lag Regression</h2>
-        <p>Analyzing how US macroeconomic variables explain equity returns with time lags</p>
+        <div className="section-ico macro"><Icon name="trendingUp" size={24} /></div>
+        <div>
+          <h2>Macro Factor & Lag Regression</h2>
+          <p>How macroeconomic variables explain equity returns — and with what time delay</p>
+        </div>
+      </motion.div>
+
+      <motion.div className="section-intro" variants={item}>
+        <span className="intro-ico"><Icon name="info" size={18} /></span>
+        <span>
+          We regress an asset's monthly return on eight macro factors (VIX, oil, gold, the
+          dollar, the 10Y yield, Fed Funds, inflation and unemployment), each included at
+          several monthly <strong>lags</strong>. The goal is to see which forces actually
+          drive returns and whether they act <strong>now</strong> or <strong>months later</strong> —
+          a violation of the "markets are efficient and forward-looking" assumption.
+        </span>
       </motion.div>
 
       {/* Ticker selector */}
-      <motion.div variants={item} style={{ marginBottom: "1.5rem" }}>
-        <div className="card" style={{ padding: "1rem 1.5rem" }}>
-          <TickerSearch value={ticker} onSelect={setTicker} label="Analyze Ticker" />
-        </div>
+      <motion.div variants={item} className="toolbar-card">
+        <TickerSearch value={ticker} onSelect={setTicker} label="Analyze Ticker" />
       </motion.div>
 
       {loading && <LoadingState message={`Running regressions for ${ticker}…`} subtext="OLS, Granger causality & correlation analysis" />}
@@ -58,28 +71,43 @@ export default function MacroRegression() {
 
       {!loading && !error && (
         <>
-          {/* OLS Summary Stats */}
           {ols.data && (
             <motion.div className="stats-grid" variants={item}>
               <div className="stat-box">
                 <div className="stat-value highlight">{ols.data.r_squared}</div>
-                <div className="stat-label">R-Squared</div>
+                <div className="stat-label">
+                  <LabelWithTip tip="Share of the asset's return variation explained by the macro factors. 0 = no explanatory power, 1 = perfectly explained.">
+                    R-Squared
+                  </LabelWithTip>
+                </div>
               </div>
               <div className="stat-box">
                 <div className="stat-value neutral">{ols.data.adj_r_squared}</div>
-                <div className="stat-label">Adj. R-Squared</div>
+                <div className="stat-label">
+                  <LabelWithTip tip="R-Squared penalised for the number of factors used. A fairer score that does not reward simply adding more variables.">
+                    Adj. R-Squared
+                  </LabelWithTip>
+                </div>
               </div>
               <div className="stat-box">
                 <div className="stat-value neutral">
                   {ols.data.coefficients ? ols.data.coefficients.filter(c => c.significant).length : 0}
                 </div>
-                <div className="stat-label">Significant Factors</div>
+                <div className="stat-label">
+                  <LabelWithTip tip="Number of factor/lag terms whose p-value is below 0.05 — i.e. statistically unlikely to be zero by chance.">
+                    Significant Factors
+                  </LabelWithTip>
+                </div>
               </div>
               <div className="stat-box">
                 <div className="stat-value neutral">
                   {ols.data.lag_comparison ? ols.data.lag_comparison.length : 0}
                 </div>
-                <div className="stat-label">Lag Depths Tested</div>
+                <div className="stat-label">
+                  <LabelWithTip tip="How many lag depths were compared (0 months up to the maximum), to find how far back macro effects reach.">
+                    Lag Depths Tested
+                  </LabelWithTip>
+                </div>
               </div>
             </motion.div>
           )}
@@ -90,20 +118,23 @@ export default function MacroRegression() {
               <motion.div className="card" variants={item}>
                 <div className="card-header">
                   <div>
-                    <div className="card-title">Model Fit by Lag Depth</div>
+                    <div className="card-title">
+                      Model Fit by Lag Depth
+                      <InfoTip text="Each bar adds one more month of lagged factors. If the bars keep rising, macro effects reach further into the past." />
+                    </div>
                     <div className="card-subtitle">R² and Adjusted R² across lag configurations</div>
                   </div>
                 </div>
                 <div className="chart-container">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={ols.data.lag_comparison}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis dataKey="max_lag" stroke="#64748b" tick={{ fontSize: 12 }} label={{ value: "Max Lag (months)", position: "bottom", offset: -2, fill: "#64748b", fontSize: 12 }} />
-                      <YAxis stroke="#64748b" tick={{ fontSize: 12 }} />
-                      <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8 }} labelStyle={{ color: "#f1f5f9" }} itemStyle={{ color: "#94a3b8" }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                      <XAxis dataKey="max_lag" stroke={CHART.axis} tick={{ fontSize: 12 }} label={{ value: "Max Lag (months)", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 12 }} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 12 }} />
+                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "rgba(148,163,184,0.06)" }} />
                       <Legend />
-                      <Bar dataKey="r_squared" name="R²" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="adj_r_squared" name="Adj. R²" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="r_squared" name="R²" fill={CHART.teal} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="adj_r_squared" name="Adj. R²" fill={CHART.cyan} radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -115,7 +146,10 @@ export default function MacroRegression() {
               <motion.div className="card" variants={item}>
                 <div className="card-header">
                   <div>
-                    <div className="card-title">Lagged Correlation Heatmap</div>
+                    <div className="card-title">
+                      Lagged Correlation Heatmap
+                      <InfoTip text="Correlation between each macro factor (shifted back 0–3 months) and the asset's return. Teal = move together, red = move opposite." />
+                    </div>
                     <div className="card-subtitle">Correlation of each factor (lagged 0–3 months) with {ticker} returns</div>
                   </div>
                 </div>
@@ -128,11 +162,14 @@ export default function MacroRegression() {
               <motion.div className="card" variants={item}>
                 <div className="card-header">
                   <div>
-                    <div className="card-title">Granger Causality Tests</div>
+                    <div className="card-title">
+                      Granger Causality Tests
+                      <InfoTip text="Tests whether a factor's past values help predict future returns beyond what past returns alone predict. Significant = it leads returns." />
+                    </div>
                     <div className="card-subtitle">Does the macro factor help predict {ticker} returns? (p &lt; 0.05 = significant)</div>
                   </div>
                 </div>
-                <div style={{ overflowX: "auto" }}>
+                <div style={{ overflowX: "auto", maxHeight: 400, overflowY: "auto" }}>
                   <table className="data-table">
                     <thead>
                       <tr>
@@ -146,7 +183,7 @@ export default function MacroRegression() {
                     <tbody>
                       {granger.data.granger_results.map((r, i) => (
                         <tr key={i}>
-                          <td style={{ color: "#f1f5f9", fontFamily: "var(--font-main)" }}>{r.factor}</td>
+                          <td style={{ color: "var(--text-primary)", fontFamily: "var(--font-main)" }}>{r.factor}</td>
                           <td>{r.lag}</td>
                           <td>{r.f_stat}</td>
                           <td className={r.significant ? "significant" : "not-significant"}>{r.p_value}</td>
@@ -168,8 +205,11 @@ export default function MacroRegression() {
               <motion.div className="card" variants={item}>
                 <div className="card-header">
                   <div>
-                    <div className="card-title">OLS Regression Coefficients</div>
-                    <div className="card-subtitle">Full model with 3-month lags for {ticker}</div>
+                    <div className="card-title">
+                      OLS Regression Coefficients
+                      <InfoTip text="The estimated effect of each factor on returns. Teal bars are statistically significant (p < 0.05); grey bars are not distinguishable from zero." />
+                    </div>
+                    <div className="card-subtitle">Full model with lags for {ticker}</div>
                   </div>
                 </div>
                 <div className="chart-container tall">
@@ -179,22 +219,21 @@ export default function MacroRegression() {
                       layout="vertical"
                       margin={{ left: 120, right: 30 }}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis type="number" stroke="#64748b" tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="variable" stroke="#64748b" tick={{ fontSize: 10 }} width={110} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                      <XAxis type="number" stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                      <YAxis type="category" dataKey="variable" stroke={CHART.axis} tick={{ fontSize: 10 }} width={110} />
                       <Tooltip
-                        contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8 }}
-                        labelStyle={{ color: "#f1f5f9" }}
-                        formatter={(val, name, props) => [
-                          `${val} (p=${props.payload.p_value})`,
-                          "Coefficient"
-                        ]}
+                        contentStyle={tooltipStyle}
+                        labelStyle={tooltipLabelStyle}
+                        itemStyle={tooltipItemStyle}
+                        cursor={{ fill: "rgba(148,163,184,0.06)" }}
+                        formatter={(val, name, props) => [`${val} (p=${props.payload.p_value})`, "Coefficient"]}
                       />
                       <Bar dataKey="coefficient" radius={[0, 4, 4, 0]}>
                         {ols.data.coefficients
                           .filter(c => c.variable !== "const")
                           .map((entry, idx) => (
-                            <Cell key={idx} fill={entry.significant ? "#10b981" : "#334155"} />
+                            <Cell key={idx} fill={entry.significant ? CHART.teal : "#3A4658"} />
                           ))}
                       </Bar>
                     </BarChart>
@@ -208,8 +247,11 @@ export default function MacroRegression() {
               <motion.div className="card" variants={item} style={{ gridColumn: "1 / -1" }}>
                 <div className="card-header">
                   <div>
-                    <div className="card-title">Macro Factor Time Series — {ticker}</div>
-                    <div className="card-subtitle">Monthly data from 2015 – 2025</div>
+                    <div className="card-title">
+                      Macro Factor Time Series — {ticker}
+                      <InfoTip text="The raw monthly history of each factor. Toggle the chips to overlay series and eyeball how they co-move." />
+                    </div>
+                    <div className="card-subtitle">Monthly data from 2015 – 2025 · click a chip to show/hide a series</div>
                   </div>
                 </div>
                 <MacroTimeSeriesChart data={ts.data} />
@@ -230,13 +272,10 @@ function HeatmapChart({ data, factors, maxLag }) {
 
   function getColor(val) {
     const ratio = val / maxAbsCorr;
-    if (ratio > 0) {
-      const intensity = Math.min(Math.round(ratio * 200), 200);
-      return `rgba(16, 185, 129, ${0.15 + intensity / 280})`;
-    } else {
-      const intensity = Math.min(Math.round(Math.abs(ratio) * 200), 200);
-      return `rgba(239, 68, 68, ${0.15 + intensity / 280})`;
+    if (ratio >= 0) {
+      return `rgba(45, 212, 191, ${0.12 + Math.min(Math.abs(ratio), 1) * 0.6})`;
     }
+    return `rgba(248, 113, 113, ${0.12 + Math.min(Math.abs(ratio), 1) * 0.6})`;
   }
 
   return (
@@ -257,7 +296,7 @@ function HeatmapChart({ data, factors, maxLag }) {
               <div
                 key={lag}
                 className="heatmap-cell"
-                style={{ background: getColor(val), color: Math.abs(val) > maxAbsCorr * 0.5 ? "#fff" : "#94a3b8" }}
+                style={{ background: getColor(val), color: Math.abs(val) > maxAbsCorr * 0.5 ? "#06231f" : "var(--text-secondary)" }}
                 title={`${factor} lag ${lag}: ${val}`}
               >
                 {val.toFixed(2)}
@@ -303,13 +342,13 @@ function MacroTimeSeriesChart({ data }) {
             style={{
               padding: "4px 12px",
               borderRadius: 999,
-              border: `1px solid ${selectedSeries.includes(col) ? COLORS[i % COLORS.length] : "rgba(255,255,255,0.1)"}`,
-              background: selectedSeries.includes(col) ? `${COLORS[i % COLORS.length]}22` : "transparent",
-              color: selectedSeries.includes(col) ? COLORS[i % COLORS.length] : "#64748b",
+              border: `1px solid ${selectedSeries.includes(col) ? SERIES[i % SERIES.length] : "var(--border-subtle)"}`,
+              background: selectedSeries.includes(col) ? `${SERIES[i % SERIES.length]}22` : "transparent",
+              color: selectedSeries.includes(col) ? SERIES[i % SERIES.length] : "var(--text-muted)",
               fontSize: "0.75rem",
               fontWeight: 500,
               cursor: "pointer",
-              fontFamily: "var(--font-main)",
+              fontFamily: "var(--font-mono)",
               transition: "all 0.2s ease",
             }}
           >
@@ -320,13 +359,13 @@ function MacroTimeSeriesChart({ data }) {
       <div className="chart-container tall">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(chartData.length / 8)} />
-            <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-            <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8 }} labelStyle={{ color: "#f1f5f9" }} itemStyle={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }} />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+            <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(chartData.length / 8)} />
+            <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
             <Legend />
             {selectedSeries.map((col) => (
-              <Line key={col} type="monotone" dataKey={col} stroke={COLORS[columns.indexOf(col) % COLORS.length]} dot={false} strokeWidth={1.5} />
+              <Line key={col} type="monotone" dataKey={col} stroke={SERIES[columns.indexOf(col) % SERIES.length]} dot={false} strokeWidth={1.6} />
             ))}
           </LineChart>
         </ResponsiveContainer>

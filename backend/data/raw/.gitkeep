@@ -1,0 +1,2 @@
+# Keeps the data cache directory in the repo.
+# Market-data CSVs here are downloaded at runtime and git-ignored.

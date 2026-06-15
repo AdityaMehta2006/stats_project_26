@@ -103,7 +103,7 @@ def run_granger_causality(ticker: str = "^GSPC", max_lag: int = 4) -> dict:
         if len(subset) < max_lag + 10:
             continue
         try:
-            gc = grangercausalitytests(subset, maxlag=max_lag, verbose=False)
+            gc = grangercausalitytests(subset, maxlag=max_lag)
             for lag in range(1, max_lag + 1):
                 f_test = gc[lag][0]["ssr_ftest"]
                 results.append({
