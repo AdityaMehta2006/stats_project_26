@@ -55,6 +55,30 @@ signal `{type, asset, direction, severity 0–1, evidence:{metric:value}, asof}`
       cited evidence, LLM explanation), with a rules-vs-LLM toggle and a
       per-pillar drill-down link.
 
+### 1d. Future detectors — opportunity engine v2
+Each is another *lens* for spotting opportunity (stats detect, AI explains):
+- [ ] **Valuation / "is it bloated?"** — fundamental ratios (P/E, P/B, P/S, PEG,
+      EV/EBITDA from `yfinance` `Ticker.info`) vs the stock's own history and peers,
+      plus a technical stretch check (% above 200-DMA, RSI). Flags "priced for
+      perfection" (avoid/short) vs "on sale" (value buy).
+- [ ] **Options vol-mispricing** — implied vol (Black–Scholes, §7) vs GARCH forecast → options rich/cheap.
+- [ ] **Momentum & relative strength** — rank a universe by risk-adjusted 12–1 month momentum.
+- [ ] **Oversold bounce** — distance from 52-week high + RSI → mean-reversion candidates.
+- [ ] **Volatility squeeze** — Bollinger/Keltner compression → breakout setup.
+- [ ] **Correlation-regime shift** — usually-correlated assets decoupling.
+- [ ] **Seasonality / calendar effects** — turn-of-month, "sell in May", day-of-week.
+- [ ] **Alpha vs beta** — separate market-driven moves from stock-specific mispricing.
+- [ ] **Unusual volume** — accumulation/distribution vs average.
+- [ ] **Risk budgeting** — convert the detected regime into a suggested position size.
+
+### 1e. Decision-engine modes — rules vs LLM
+Current design is a hybrid with a UI toggle: **rules detect, LLM explains**.
+- Rules-based: deterministic, transparent, instant, exact numbers, offline — but rigid.
+- LLM-based: flexible, natural-language synthesis — but slower and needs guardrails.
+- [ ] Add an optional **LLM decision-maker** mode (the model also weighs/ranks
+      signals, not just explains), kept honest by rule-based guardrails + number
+      validation. Keep pure-rules as the safe default.
+
 ---
 
 ## 2. Local LLM runtime setup — P0 (prerequisite for 1b)

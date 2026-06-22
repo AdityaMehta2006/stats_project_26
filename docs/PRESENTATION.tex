@@ -1,6 +1,7 @@
 \documentclass[11pt]{article}
 \usepackage{quanttheme}
 
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \newcommand{\tk}[1]{\texttt{#1}}
 
 \begin{document}
@@ -136,6 +137,87 @@ Opportunities, Macro, GARCH, Pair Trading).
 layer, and the user interface all work together on live markets. Next steps
 (standardised comparisons, an options / Black–Scholes module, and a back-test of the
 signals) are tracked in the project roadmap.
+\end{opp}
+
+\section{Modules Built So Far}
+
+\subsection*{Backend (Python / FastAPI)}
+\begin{itemize}
+\item \tk{data\_loader.py} — data acquisition (Yahoo Finance, FRED, DBnomics), caching, dataset builders
+\item \tk{analysis/macro\_regression.py} — Pillar 1: OLS lag regression, Granger causality, correlation
+\item \tk{analysis/garch.py} — Pillar 2: GARCH(1,1), volatility clustering, return distribution
+\item \tk{analysis/pairs.py} — Pillar 3: cointegration, spread / z-score, trading signals
+\item \tk{analysis/recommender.py} — the opportunity engine: detectors, ranking, confidence
+\item \tk{llm\_client.py} — provider-agnostic local-LLM client (GPU server + CPU fallback)
+\item \tk{main.py} — FastAPI endpoints tying it all together
+\end{itemize}
+
+\subsection*{Frontend (React + Vite)}
+\begin{itemize}
+\item Five tab panels — Overview, Opportunities, Macro Regression, GARCH Volatility, Pair Trading
+\item Shared components — SVG icon set, info-tooltips, time-range filter, ticker search, forex selector, status states, animated background
+\item Support — chart theme, time-range utilities, data-fetch hook, API client
+\end{itemize}
+
+\section{Future Plans — Expanding the Opportunity Engine}
+Each future module is another \emph{lens} for spotting opportunity. The engine's
+principle stays the same: \textbf{statistics detect, the AI explains}.
+
+\subsection*{1. Options \& Black–Scholes}
+Price European call / put options and their Greeks, and back out the market's
+\textbf{implied volatility}. \textbf{Opportunity:} compare implied volatility with
+our GARCH forecast — when the market pays far more (or less) for risk than the model
+expects, options are ``rich'' or ``cheap''.
+
+\subsection*{2. Valuation — ``is the stock bloated / overpriced?''}
+Pull fundamental ratios (P/E, P/B, P/S, PEG, EV/EBITDA) and compare them with the
+stock's own history and its peers, alongside a technical ``stretch'' check (how far
+price sits above its 200-day average, and RSI). \textbf{Opportunity:} flag names
+``priced for perfection'' (avoid / potential short) versus those ``on sale''
+(potential value buys).
+
+\subsection*{3. More opportunity lenses}
+\begin{itemize}
+\item \textbf{Momentum \& relative strength} — rank a universe by risk-adjusted
+12–1 month momentum to spot rotation leaders and laggards.
+\item \textbf{Oversold bounce} — distance from the 52-week high plus RSI to find
+mean-reversion candidates.
+\item \textbf{Volatility squeeze} — detect compression that often precedes a breakout.
+\item \textbf{Correlation-regime shift} — assets that usually move together
+decoupling (a diversification or pairs opportunity).
+\item \textbf{Seasonality / calendar effects} — turn-of-month and ``sell in May''
+style documented anomalies.
+\item \textbf{Alpha vs beta} — separate market-driven moves from stock-specific mispricing.
+\item \textbf{Unusual volume} — accumulation / distribution versus the average.
+\item \textbf{Risk budgeting} — turn the detected regime into a suggested position size.
+\end{itemize}
+
+\section{Decision Engine: Rules-based vs LLM-based}
+We support \textbf{both}, and today combine them: \emph{rules detect, the LLM
+explains}. A toggle lets the user choose the mode; pure rules is the safe default.
+
+\begin{table}[h]
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\linewidth}{>{\bfseries}l Y Y}
+\toprule
+& \textbf{\color{qnavy}Rules-based} & \textbf{\color{qnavy}LLM-based} \\
+\midrule
+Determinism & Fully deterministic, reproducible & Varies with settings \\
+Explainability & Transparent thresholds & Natural-language reasoning \\
+Numbers & Exact by construction & Must be guarded against errors \\
+Flexibility & Rigid; new rules need code & Synthesises novel combinations \\
+Speed \& cost & Instant, free & ≈4 s on GPU, compute cost \\
+Works offline & Yes & Needs the local model \\
+Best at & Detection \& signals & Explanation \& synthesis \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{opp}
+Our design uses each for what it is good at — rules produce the trustworthy numbers,
+the LLM produces the readable story. A future \textbf{LLM decision-maker} mode would
+let the model also weigh and rank signals (not just explain), kept honest by
+rule-based guardrails and number validation.
 \end{opp}
 
 \section*{Appendix — Each anomaly in one line (layman)}

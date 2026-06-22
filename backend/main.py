@@ -37,6 +37,7 @@ from analysis.pairs import (
     get_forex_correlation,
 )
 from analysis.recommender import generate_recommendations
+from analysis.black_scholes import analyze_option
 import llm_client
 
 app = FastAPI(
@@ -228,6 +229,21 @@ def recommendations(
     """Scan a ticker (+ forex pairs) for anomalies/opportunities and rank them."""
     pair_list = [p.strip() for p in pairs.split(",")] if pairs else None
     return generate_recommendations(ticker=ticker, pairs=pair_list, use_llm=use_llm)
+
+
+# ---------------------------------------------------------------------------
+# Options — Black-Scholes
+# ---------------------------------------------------------------------------
+
+@app.get("/api/options/black-scholes")
+def options_black_scholes(
+    ticker: str = Query("^GSPC", description="Underlying ticker symbol"),
+    strike: Optional[float] = Query(None, description="Strike price; omit for at-the-money"),
+    expiry: Optional[str] = Query(None, description="Expiry date YYYY-MM-DD; omit for ~30 days"),
+    option: str = Query("call", description="call or put"),
+):
+    """Black-Scholes price + Greeks for an option, with optional live-chain vol comparison."""
+    return analyze_option(ticker=ticker, strike=strike, expiry=expiry, option=option)
 
 
 # ---------------------------------------------------------------------------
