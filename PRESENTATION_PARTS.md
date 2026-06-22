@@ -1,72 +1,65 @@
 # Presentation — Split into 3 Parts
 
-The Tuesday presentation (`docs/PRESENTATION.pdf`) divided into three balanced
-segments, each with the topics it covers. Use this to share speaking time or to
-structure the talk into a beginning, middle, and end.
+The Tuesday presentation (`docs/PRESENTATION.pdf`) divided into three parts of
+**equal depth**. The three statistical pillars are deliberately split — one core
+method per presenter — so no single part carries all the heavy content. Fixed
+assignments: **Aditya opens**, and **Rithesh covers Black–Scholes** (kept
+high-level). Everything else is balanced around those.
+
+| Part | Presenter | Owns this pillar | Theme |
+|------|-----------|------------------|-------|
+| 1 | **Aditya** | GARCH volatility | Opening + GARCH + Valuation |
+| 2 | **Jitvan** | Macro regression | Macro + the Engine |
+| 3 | **Rithesh** | Pair trading | Pairs + Decision modes + Future |
 
 ---
 
-## Part 1 — The Idea & the Setup
-*"What are we studying, why, and with what data?"*
+## Part 1 — Aditya — Opening, GARCH & Valuation
 
 **Topics covered**
-- **Title of the study** — Quantitative Anomalies as Market Opportunities.
-- **The core idea** — the Efficient Market Hypothesis vs reality; an anomaly is an
-  opportunity seen from the other side.
-- **Objectives** — the five objectives (macro-driver, risk-regime, mean-reversion,
-  opportunity synthesis, accessibility), each framed as an opportunity.
-- **Motivation** — why the topic: anomalies made tangible, risk reframed as
-  opportunity, statistics + local AI, learning value.
-- **Data & APIs used** (in place of questionnaire + sample):
-  - Yahoo Finance (`yfinance`), FRED, DBnomics backup
-  - our FastAPI backend endpoints, and the local AI API.
-
-**Maps to PDF sections:** 1 (Title), 2 (Objectives), 3 (Motivation), 4 (Data & APIs).
+1. **Title & core idea** — Quantitative Anomalies as Market Opportunities; the
+   Efficient Market Hypothesis vs reality, and why an anomaly is an opportunity.
+2. **Objectives & motivation** — the five opportunity-framed objectives, and why we
+   chose the topic (anomalies made tangible; statistics + local AI).
+3. **Data & APIs** (in place of questionnaire + sample) — Yahoo Finance, FRED,
+   DBnomics backup; our FastAPI backend; the local AI API.
+4. **Pillar — GARCH & Volatility Clustering** — modelling time-varying risk;
+   evidence of clustering and fat tails via Ljung-Box and Jarque-Bera
+   *(sample: persistence ≈ 0.9955, excess kurtosis ≈ 16)*.
+5. **Valuation lens** — "is a stock bloated / overpriced?" via fundamental ratios
+   (P/E, P/B, PEG) vs the stock's history and peers — flagging "priced for
+   perfection" vs "on sale".
 
 ---
 
-## Part 2 — The Methods & What Works Today
-*"How do we detect each anomaly, and what does the pilot show?"*
+## Part 2 — Jitvan — Macro & the Engine
 
 **Topics covered**
-- **The three analysis pillars:**
-  - Pillar 1 — Macro Factor & Lag Regression (OLS with lags, Granger causality).
-  - Pillar 2 — GARCH & Volatility Clustering (time-varying risk, fat tails).
-  - Pillar 3 — Forex Pair Trading (cointegration, z-score, mean reversion).
-- **The recommendation engine** — "stats detect, AI explains"; four detectors,
-  severity ranking, confidence.
-- **Pilot study results** — validated data pipeline; sample findings on the S&P 500
-  (macro R² ≈ 0.64; GARCH persistence ≈ 0.9955, kurtosis ≈ 16; USDCHF/USDJPY
-  cointegrated p ≈ 0.008); local AI note in ≈4 s on the GPU.
-- **Modules built so far** — backend (data loader, three pillars, recommender, LLM
-  client, API) and frontend (five tabs + shared components).
-
-**Maps to PDF sections:** 5 (Pilot Study), 6 (Modules Built So Far), plus the
-methods behind each pillar.
+1. **Pillar — Macro Factor & Lag Regression** — OLS with lagged macro factors and
+   Granger causality: which forces move an asset and with what delay
+   *(sample: S&P 500 macro R² ≈ 0.64)*.
+2. **The recommendation engine** — "statistics detect, the AI explains"; how
+   detectors rank opportunities by severity with a confidence score.
+3. **Pilot status & modules built** — validated data pipeline (corrupted cache
+   found and fixed; ranges sanity-checked) and the working backend + dashboard.
 
 ---
 
-## Part 3 — Decision Engine & the Road Ahead
-*"How does the engine decide, and where is this going?"*
+## Part 3 — Rithesh — Pairs, Decision Modes & Future
 
 **Topics covered**
-- **Decision engine: rules-based vs LLM-based** — the comparison (determinism,
-  explainability, numbers, flexibility, speed, offline), and our hybrid with a
-  toggle; the planned LLM decision-maker mode with guardrails.
-- **Future plans — expanding the opportunity engine:**
-  - Options & Black–Scholes (implied vs model volatility = vol mispricing).
-  - Valuation — "is the stock bloated / overpriced?" (P/E, P/B, PEG vs history/peers).
-  - More lenses — momentum, oversold bounce, volatility squeeze, correlation-regime
-    shift, seasonality, alpha vs beta, unusual volume, risk budgeting.
-- **Closing** — the layman one-liners for each anomaly (the Appendix), and the
-  research gap we address (integration, interpretation, actionability).
-
-**Maps to PDF sections:** 7 (Future Plans), 8 (Decision Engine: Rules vs LLM),
-Appendix.
+1. **Pillar — Forex Pair Trading** — cointegration across pairs, the spread and
+   z-score, mean-reversion signals and half-life
+   *(sample: USDCHF/USDJPY cointegrated, p ≈ 0.008)*.
+2. **Decision engine — rules-based vs LLM-based** — the trade-offs (determinism,
+   explainability, speed, flexibility) and our hybrid approach with a toggle.
+3. **Future directions** — **options analysis via Black–Scholes** *(keep
+   high-level: the idea is to gauge whether options look expensive or cheap versus
+   our volatility model — no formula needed)*; plus a few more opportunity lenses;
+   brief closing.
 
 ---
 
-### Suggested timing (for a ~15-minute talk)
-- Part 1 — ~5 min (sets up the problem and data)
-- Part 2 — ~6 min (the substance: methods + working results)
-- Part 3 — ~4 min (design choice + vision)
+### Timing
+Roughly **5 minutes per part** for a ~15-minute talk. Each part owns one core
+statistical method plus supporting material, so the depth is even across presenters.
