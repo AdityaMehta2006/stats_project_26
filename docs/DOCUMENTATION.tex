@@ -1,0 +1,188 @@
+\documentclass[11pt]{article}
+\usepackage{quanttheme}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\tk}[1]{\texttt{#1}}
+
+\begin{document}
+\thispagestyle{empty}
+
+\titlebanner
+  {QuantAnomalies}
+  {Project Documentation \& Story}
+  {A statistical and AI-assisted dashboard that hunts for market anomalies and
+   reframes them as opportunities}
+
+\vspace{1.2em}
+
+\section{The Big Idea}
+Classic finance theory (the ``Efficient Market Hypothesis'') makes three tidy
+assumptions: prices instantly reflect all information, risk is roughly constant, and
+you cannot predict returns. Decades of evidence show reality is messier — and those
+mismatches are recurring, studied patterns called \textbf{anomalies}.
+
+\begin{opp}
+Our insight: an anomaly is just an \textbf{opportunity} seen from the other side. The
+same crack in the theory that academics flag as ``the model is wrong here'' is
+exactly where a careful observer might find an edge. QuantAnomalies makes three of
+these anomalies visible, measurable, and actionable — then layers an AI analyst on
+top to explain what it finds.
+\end{opp}
+
+\begin{table}[h]
+\renewcommand{\arraystretch}{1.35}
+\begin{tabularx}{\linewidth}{Y Y Y}
+\toprule
+\textbf{\color{qnavy}Textbook says\ldots} & \textbf{\color{qnavy}Reality (opportunity)} & \textbf{\color{qnavy}Layman analogy} \\
+\midrule
+Prices react instantly & Macro news ripples over \textbf{weeks} (lagged effects) & A stone in a pond — the ripple takes time to reach the edge \\
+Risk is constant & Volatility \textbf{clusters}; tails are \textbf{fat} & Storms come in clusters, and big ones hit more often than forecast \\
+Returns are unpredictable & Some pairs are \textbf{cointegrated} (tethered) & Two dogs on one leash — they wander but snap back together \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{What the Project Does}
+A full-stack web application with five areas:
+\begin{enumerate}
+\item \textbf{Overview} — what the project is and how to navigate it.
+\item \textbf{Opportunities} — the recommendation engine: an automated scan that ranks
+what's unusual / actionable right now, with an optional AI analyst note.
+\item \textbf{Macro Regression} — which macro forces drive an asset, and with what lag.
+\item \textbf{GARCH Volatility} — how risk changes over time, and how fat the tails are.
+\item \textbf{Pair Trading} — cointegrated forex pairs and mean-reversion signals.
+\end{enumerate}
+Everything is \textbf{dynamic}: the user can type any ticker (stock, index, crypto,
+future) or pick any combination of 45 forex pairs, and the analysis regenerates.
+
+\section{Architecture}
+\begin{Verbatim}
+            +-----------------------------+
+            |   React + Vite frontend     |   5 tabs, Recharts, framer-motion
+            |   (quant-terminal UI)       |   time filters, info tooltips
+            +--------------+--------------+
+                           |  HTTP (JSON)
+            +--------------v--------------+
+            |   FastAPI backend (Python)  |
+            |   3 analysis pillars +      |
+            |   recommendation engine     |
+            +---+---------------+---------+
+                |               |
+   +------------v---+   +-------v------------+   +----------------------+
+   | Data layer     |   | Local LLM (GPU)    |   | External data APIs   |
+   | yfinance +FRED |   | llama.cpp server   |   | Yahoo Finance, FRED, |
+   | CSV cache      |   | Qwen3-4B, Vulkan   |   | DBnomics (backup)    |
+   +----------------+   +--------------------+   +----------------------+
+\end{Verbatim}
+
+\textbf{Stack:} Python \textbullet{} FastAPI \textbullet{} pandas/numpy \textbullet{}
+statsmodels \textbullet{} arch \textbullet{} scipy \textbullet{} React 19 \textbullet{}
+Vite \textbullet{} Recharts \textbullet{} framer-motion \textbullet{} llama.cpp (GPU).
+
+\section{The Three Pillars}
+
+\subsection{Pillar 1 — Macro Factor \& Lag Regression}
+\textbf{Question:} Which macro forces move an asset, and how quickly? \\
+\textbf{Method:} Build a monthly dataset of the asset's return plus eight factors
+(VIX, oil, gold, US dollar, 10-yr yield, Fed Funds, inflation, unemployment). Run OLS
+regression with \textbf{time lags} (0--3 months), Granger-causality tests, and a
+lagged-correlation heatmap. \\
+\textbf{Opportunity:} If a factor predicts returns weeks ahead, that lag is a window
+to position before the move. \emph{(Sample: S\&P 500 R² ≈ 0.64 monthly.)}
+
+\subsection{Pillar 2 — GARCH \& Volatility Clustering}
+\textbf{Question:} How does risk change over time, and are crashes under-estimated? \\
+\textbf{Method:} Fit a \textbf{GARCH(1,1)} model to daily returns to estimate
+day-by-day volatility; test clustering via autocorrelation of squared returns
+(Ljung-Box); test normality (Jarque-Bera, QQ plot, skew/kurtosis). \\
+\textbf{Opportunity:} A high-volatility regime is a cue to reduce risk; calm regimes
+can precede expansions. Fat tails warn that standard risk measures understate danger.
+\emph{(Sample: persistence ≈ 0.9955, excess kurtosis ≈ 16 — strongly non-normal.)}
+
+\subsection{Pillar 3 — Forex Pair Trading}
+\textbf{Question:} Which currency pairs are tethered, and when is the gap tradeable? \\
+\textbf{Method:} Engle-Granger \textbf{cointegration} across all pair combinations;
+for the best pair, build a hedge-ratio \textbf{spread}, standardise it to a
+\textbf{z-score}, and generate buy/sell/exit signals (enter beyond ±2, exit near 0);
+estimate the mean-reversion \textbf{half-life}. \\
+\textbf{Opportunity:} Market-neutral ``statistical arbitrage'' — profit from the gap
+closing regardless of overall market direction. \emph{(Sample: USDCHF/USDJPY
+cointegrated, p ≈ 0.008, half-life ≈ 64 days.)}
+
+\section{The Recommendation Engine — ``stats detect, AI explains''}
+This is the layer that turns a dashboard into a recommender. The principle:
+\textbf{deterministic statistics do the detecting; the AI only explains.} The model is
+handed the detected numbers and is instructed never to invent figures — which is what
+makes a small local model trustworthy here.
+
+\textbf{Detectors (v1):}
+\begin{itemize}
+\item \textbf{Volatility regime} — current GARCH volatility vs its own history.
+\item \textbf{Tail event} — today's move measured in standard deviations.
+\item \textbf{Trend} — price vs 50/200-day averages, near 52-week highs/lows.
+\item \textbf{Forex mean-reversion} — cointegrated pair stretched beyond ±2 z-score.
+\end{itemize}
+Each emits a signal with a 0--1 \textbf{severity}; the engine ranks them and computes
+an overall \textbf{confidence}. A rules-based summary always works; the
+\textbf{local LLM} (Qwen3-4B on the GPU) adds a plain-English analyst note in ≈4 seconds.
+
+\section{Data Pipeline \& Robustness}
+\begin{itemize}
+\item \textbf{Sources:} Yahoo Finance (prices) and FRED (macro), cached as CSV so the
+app runs offline once data is fetched.
+\item FRED downloads were failing (HTTP 403) — fixed with a proper request header,
+plus a \textbf{DBnomics} fallback mirror.
+\item The flaky FRED 10-year series was replaced by Yahoo's \tk{\textasciicircum{}TNX}.
+\item \tk{build\_macro\_dataset} is \textbf{fault-tolerant}: if one factor source
+fails, that factor is skipped instead of breaking the whole study.
+\item A data-integrity bug (the VIX and oil caches had been seeded with the wrong
+series) was detected and corrected; all series now validate to real ranges.
+\end{itemize}
+
+\section{The Dashboard (UI)}
+\begin{itemize}
+\item A dark \textbf{``quant terminal''} theme (deep navy, teal/cyan data, gold
+highlights), a custom \textbf{SVG icon set} (no emojis), and a subtle SVG grid backdrop.
+\item \textbf{Hover info-tooltips} explain every metric in plain English.
+\item \textbf{Time-range filters} (1M--All) on every time-series chart, with the
+y-axis auto-scaling to the visible window.
+\item \textbf{framer-motion} polish: animated tab transitions, sliding active
+indicators, and animated confidence/severity bars.
+\end{itemize}
+
+\section{The Story So Far}
+\begin{enumerate}
+\item \textbf{Revived a broken project.} The app wouldn't run — the \tk{python}
+command pointed at a dead path; we located the working Anaconda interpreter and got
+it running again.
+\item \textbf{Fixed the data.} Repaired FRED access, added fallbacks, swapped the
+flaky 10-yr source to Yahoo, and cleaned corrupted caches so every value is sane.
+\item \textbf{Enriched the analysis.} Added gold and the dollar index as macro
+factors and made the dataset builder fault-tolerant.
+\item \textbf{Redesigned the interface.} New professional theme, SVG icons,
+explanatory copy, hover tooltips, and a stealth SVG background.
+\item \textbf{Built the recommendation engine.} Four anomaly/opportunity detectors
+plus a provider-agnostic AI client.
+\item \textbf{Put the AI on the GPU.} Switched the local model from CPU to the RTX
+4050 via the bundled Vulkan \tk{llama.cpp} server — a ≈6× speed-up (25s → ≈4s).
+\item \textbf{Added time filters and motion.} Interactive ranges and a proper
+animation pass across the app.
+\end{enumerate}
+
+\section{What's Next}
+Tracked in the roadmap: standardised factor comparisons (so ``which factor matters
+most'' is fair), an \textbf{options / Black–Scholes} module (implied-vs-model
+volatility as another opportunity signal), more detectors (macro dislocation,
+breakout), news-on-chart-click, and a back-test of the signals to turn
+``opportunities'' into measured evidence.
+
+\section{How to Run}
+\begin{itemize}
+\item \textbf{Backend:} \tk{python -m uvicorn main:app -{}-app-dir backend -{}-port 8000}
+(use the Anaconda interpreter on this machine).
+\item \textbf{GPU AI server (recommended):}
+\tk{llama-server.exe -m <Qwen3-4B gguf> -ngl 99 -c 4096 -{}-port 8080}
+\item \textbf{Frontend:} \tk{npm run dev} in \tk{frontend/} → open
+\tk{http://localhost:5173}.
+\end{itemize}
+
+\end{document}

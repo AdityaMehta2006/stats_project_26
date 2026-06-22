@@ -6,7 +6,7 @@
  * spread/z-score chart, signals, and correlation matrix.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -18,6 +18,8 @@ import { LoadingState, ErrorState } from "./common/StatusStates";
 import ForexPairSelector from "./common/ForexPairSelector";
 import Icon from "./common/Icon";
 import { InfoTip, LabelWithTip } from "./common/Tooltip";
+import TimeRangeFilter from "./common/TimeRangeFilter";
+import { filterByRange, axisInterval } from "../timeRange";
 import { CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 
 const container = {
@@ -38,6 +40,11 @@ export default function PairTrading() {
 
   const loading = coint.loading || best.loading || corr.loading;
   const error = coint.error || best.error || corr.error;
+
+  const [range, setRange] = useState("1Y");
+  const spreadData = useMemo(() => filterByRange(best.data?.spread_series || [], range), [best.data, range]);
+  const priceData = useMemo(() => filterByRange(best.data?.price_series || [], range), [best.data, range]);
+  const zData = useMemo(() => spreadData.filter((d) => d.z_score !== undefined), [spreadData]);
 
   return (
     <motion.div variants={container} initial="hidden" animate="show">
@@ -63,6 +70,9 @@ export default function PairTrading() {
       {/* Pair selector */}
       <motion.div variants={item} className="toolbar-card">
         <ForexPairSelector selectedPairs={selectedPairs} onPairsChange={setSelectedPairs} />
+        <div className="trf-wrap"><span className="trf-label">Range</span>
+          <TimeRangeFilter value={range} onChange={setRange} layoutId="pairs-range" />
+        </div>
       </motion.div>
 
       {loading && <LoadingState message="Testing cointegration across pairs…" subtext="Engle-Granger tests and spread construction" />}
@@ -140,9 +150,9 @@ export default function PairTrading() {
                 </div>
                 <div className="chart-container tall">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={best.data.spread_series.filter(d => d.z_score !== undefined)}>
+                    <ComposedChart data={zData}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(best.data.spread_series.length / 8)} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(zData.length)} />
                       <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                       <ReferenceLine y={2} stroke={CHART.down} strokeDasharray="5 5" label={{ value: "Sell Zone", fill: CHART.down, fontSize: 10, position: "right" }} />
@@ -169,9 +179,9 @@ export default function PairTrading() {
                 </div>
                 <div className="chart-container">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={best.data.price_series}>
+                    <LineChart data={priceData}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(best.data.price_series.length / 6)} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(priceData.length, 6)} />
                       <YAxis yAxisId="left" stroke={CHART.teal} tick={{ fontSize: 11 }} />
                       <YAxis yAxisId="right" orientation="right" stroke={CHART.cyan} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
@@ -198,9 +208,9 @@ export default function PairTrading() {
                 </div>
                 <div className="chart-container">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={best.data.spread_series}>
+                    <LineChart data={spreadData}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(best.data.spread_series.length / 6)} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(spreadData.length, 6)} />
                       <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                       <Line type="monotone" dataKey="spread" stroke={CHART.violet} dot={false} strokeWidth={1.6} name="Spread" />

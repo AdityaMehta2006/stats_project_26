@@ -58,3 +58,10 @@ export const getPairsCorrelation = (pairs = null) => {
   const q = pairs ? `?pairs=${encodeURIComponent(pairs.join(","))}` : "";
   return fetchJSON(`/pairs/correlation${q}`);
 };
+
+// Recommendation / Anomaly–Opportunity engine
+export const getLlmInfo = () => fetchJSON("/llm/info");
+export const getRecommendations = (ticker = "^GSPC", useLlm = false, pairs = null) => {
+  const p = pairs ? `&pairs=${encodeURIComponent(pairs.join(","))}` : "";
+  return fetchJSON(`/recommendations?ticker=${encodeURIComponent(ticker)}&use_llm=${useLlm}${p}`);
+};

@@ -1,0 +1,80 @@
+% quanttheme.sty — shared aesthetic theme for the QuantAnomalies documents.
+\ProvidesPackage{quanttheme}
+
+\usepackage[a4paper,margin=2.2cm,headheight=15pt,footskip=22pt]{geometry}
+\usepackage{fontspec}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage[most]{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{fancyvrb}
+\usepackage{parskip}
+\usepackage[hidelinks]{hyperref}
+
+% ---- Palette (print-friendly: dark ink on light, brand accents) ----
+\definecolor{qink}{HTML}{1E293B}
+\definecolor{qmuted}{HTML}{64748B}
+\definecolor{qteal}{HTML}{0E9C8B}
+\definecolor{qcyan}{HTML}{0E7FB6}
+\definecolor{qgold}{HTML}{B45309}
+\definecolor{qnavy}{HTML}{0B1B33}
+\definecolor{qline}{HTML}{E2E8F0}
+\definecolor{qbg}{HTML}{F6F9FC}
+
+% ---- Fonts (Windows system fonts, Unicode-capable) ----
+\setmainfont{Segoe UI}
+\setmonofont{Consolas}[Scale=0.92]
+\color{qink}
+
+\hypersetup{colorlinks=true,linkcolor=qteal,urlcolor=qcyan}
+
+% ---- Headings ----
+\titleformat{\section}
+  {\bfseries\Large\color{qnavy}}{\thesection}{0.6em}{}
+  [{\color{qteal}\titlerule[1.4pt]}]
+\titleformat{\subsection}
+  {\bfseries\large\color{qteal}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{1.5em}{0.55em}
+\titlespacing*{\subsection}{0pt}{1.0em}{0.35em}
+
+% ---- Lists ----
+\setlist[itemize]{leftmargin=1.3em,itemsep=2pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=1.5em,itemsep=3pt,topsep=3pt}
+\renewcommand{\labelitemi}{\color{qteal}\textbf{\textperiodcentered}}
+
+% ---- Header / footer ----
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{qmuted}\textbf{QuantAnomalies}}
+\fancyhead[R]{\small\color{qmuted}\thepage}
+\renewcommand{\headrule}{\color{qline}\hrule height 0.5pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ---- Callout boxes ----
+\newtcolorbox{opp}{enhanced,breakable,colback=qteal!7,colframe=qteal,
+  boxrule=0pt,leftrule=3pt,arc=2pt,left=10pt,right=10pt,top=7pt,bottom=7pt}
+\newtcolorbox{keybox}{enhanced,breakable,colback=qbg,colframe=qline,
+  boxrule=0.7pt,arc=3pt,left=10pt,right=10pt,top=7pt,bottom=7pt}
+\newtcolorbox{goldbox}{enhanced,breakable,colback=qgold!7,colframe=qgold,
+  boxrule=0pt,leftrule=3pt,arc=2pt,left=10pt,right=10pt,top=7pt,bottom=7pt}
+
+% ---- Title banner ----
+\newcommand{\titlebanner}[3]{%
+  \begin{tcolorbox}[enhanced,colback=qnavy,colframe=qnavy,arc=6pt,
+      left=20pt,right=20pt,top=18pt,bottom=18pt,
+      borderline north={3pt}{0pt}{qteal},drop fuzzy shadow]
+    {\color{white}\bfseries\fontsize{24}{28}\selectfont #1}\\[4pt]
+    {\color{qteal!85!white}\large #2}\\[10pt]
+    {\color{white!75!qnavy}\small #3}
+  \end{tcolorbox}}
+
+% ---- Verbatim block style (for the architecture diagram) ----
+\fvset{frame=single,framerule=0.7pt,rulecolor=\color{qline},
+  fontsize=\footnotesize,formatcom=\color{qink}}
+
+% ---- Mono inline helper ----
+\newcommand{\code}[1]{{\small\texttt{#1}}}

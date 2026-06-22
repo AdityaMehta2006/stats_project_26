@@ -6,7 +6,7 @@
  * QQ plot, volatility clustering ACF, and model comparison.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -19,6 +19,8 @@ import { LoadingState, ErrorState } from "./common/StatusStates";
 import TickerSearch from "./common/TickerSearch";
 import Icon from "./common/Icon";
 import { InfoTip, LabelWithTip } from "./common/Tooltip";
+import TimeRangeFilter from "./common/TimeRangeFilter";
+import { filterByRange, axisInterval } from "../timeRange";
 import { CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 
 const container = {
@@ -40,6 +42,10 @@ export default function GarchVolatility() {
 
   const loading = garch.loading || clustering.loading || dist.loading || compare.loading;
   const error = garch.error || clustering.error || dist.error || compare.error;
+
+  const [range, setRange] = useState("1Y");
+  const volData = useMemo(() => filterByRange(garch.data?.conditional_volatility || [], range), [garch.data, range]);
+  const retData = useMemo(() => filterByRange(garch.data?.returns || [], range), [garch.data, range]);
 
   return (
     <motion.div variants={container} initial="hidden" animate="show">
@@ -66,6 +72,9 @@ export default function GarchVolatility() {
       {/* Ticker selector */}
       <motion.div variants={item} className="toolbar-card">
         <TickerSearch value={ticker} onSelect={setTicker} label="Analyze Ticker" />
+        <div className="trf-wrap"><span className="trf-label">Range</span>
+          <TimeRangeFilter value={range} onChange={setRange} layoutId="garch-range" />
+        </div>
       </motion.div>
 
       {loading && <LoadingState message={`Fitting GARCH model for ${ticker}…`} subtext="This may take a moment for new tickers" />}
@@ -139,7 +148,7 @@ export default function GarchVolatility() {
                 </div>
                 <div className="chart-container tall">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={garch.data.conditional_volatility}>
+                    <AreaChart data={volData}>
                       <defs>
                         <linearGradient id="volGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={CHART.teal} stopOpacity={0.35} />
@@ -147,7 +156,7 @@ export default function GarchVolatility() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(garch.data.conditional_volatility.length / 8)} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(volData.length)} />
                       <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                       <Area type="monotone" dataKey="volatility" stroke={CHART.teal} fill="url(#volGradient)" strokeWidth={1.6} name="Cond. Volatility (σ)" />
@@ -171,14 +180,14 @@ export default function GarchVolatility() {
                 </div>
                 <div className="chart-container">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={garch.data.returns} barSize={1.5}>
+                    <BarChart data={retData} barSize={1.5}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(garch.data.returns.length / 8)} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(retData.length)} />
                       <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                       <ReferenceLine y={0} stroke={CHART.axis} strokeDasharray="3 3" />
                       <Bar dataKey="return" name="Return (%)" radius={0}>
-                        {garch.data.returns.map((entry, idx) => (
+                        {retData.map((entry, idx) => (
                           <Cell key={idx} fill={entry.return >= 0 ? "rgba(52,211,153,0.75)" : "rgba(248,113,113,0.75)"} />
                         ))}
                       </Bar>

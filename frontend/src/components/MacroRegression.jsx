@@ -18,6 +18,8 @@ import { LoadingState, ErrorState } from "./common/StatusStates";
 import TickerSearch from "./common/TickerSearch";
 import Icon from "./common/Icon";
 import { InfoTip, LabelWithTip } from "./common/Tooltip";
+import TimeRangeFilter from "./common/TimeRangeFilter";
+import { filterByRange, axisInterval, MONTHLY_RANGES } from "../timeRange";
 import { CHART, SERIES, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 
 const container = {
@@ -311,6 +313,7 @@ function HeatmapChart({ data, factors, maxLag }) {
 
 function MacroTimeSeriesChart({ data }) {
   const [selectedSeries, setSelectedSeries] = useState(["Equity_Return", "VIX"]);
+  const [range, setRange] = useState("All");
   const columns = data.columns || [];
 
   const allDates = new Set();
@@ -319,18 +322,19 @@ function MacroTimeSeriesChart({ data }) {
   });
   const sortedDates = Array.from(allDates).sort();
 
-  const chartData = sortedDates.map(date => {
+  const chartData = filterByRange(sortedDates.map(date => {
     const row = { date };
     selectedSeries.forEach(col => {
       const point = (data.time_series[col] || []).find(d => d.date === date);
       if (point) row[col] = point.value;
     });
     return row;
-  });
+  }), range);
 
   return (
     <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {columns.map((col, i) => (
           <button
             key={col}
@@ -355,12 +359,16 @@ function MacroTimeSeriesChart({ data }) {
             {col}
           </button>
         ))}
+        </div>
+        <div className="trf-wrap"><span className="trf-label">Range</span>
+          <TimeRangeFilter value={range} onChange={setRange} ranges={MONTHLY_RANGES} layoutId="macro-range" />
+        </div>
       </div>
       <div className="chart-container tall">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-            <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={Math.floor(chartData.length / 8)} />
+            <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(chartData.length)} />
             <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
             <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
             <Legend />

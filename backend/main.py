@@ -36,6 +36,8 @@ from analysis.pairs import (
     get_best_pair_analysis,
     get_forex_correlation,
 )
+from analysis.recommender import generate_recommendations
+import llm_client
 
 app = FastAPI(
     title="Quantitative Anomalies API",
@@ -205,6 +207,27 @@ def pairs_corr(
     """Forex correlation matrix."""
     pair_list = [p.strip() for p in pairs.split(",")] if pairs else None
     return get_forex_correlation(pair_labels=pair_list)
+
+
+# ---------------------------------------------------------------------------
+# Recommendation / Anomaly–Opportunity Engine
+# ---------------------------------------------------------------------------
+
+@app.get("/api/llm/info")
+def llm_info():
+    """Report the configured LLM provider and whether it is available."""
+    return llm_client.info()
+
+
+@app.get("/api/recommendations")
+def recommendations(
+    ticker: str = Query("^GSPC", description="Equity/asset ticker symbol"),
+    pairs: Optional[str] = Query(None, description="Comma-separated forex pairs; omit for defaults"),
+    use_llm: bool = Query(False, description="Generate a natural-language note via the local LLM"),
+):
+    """Scan a ticker (+ forex pairs) for anomalies/opportunities and rank them."""
+    pair_list = [p.strip() for p in pairs.split(",")] if pairs else None
+    return generate_recommendations(ticker=ticker, pairs=pair_list, use_llm=use_llm)
 
 
 # ---------------------------------------------------------------------------
