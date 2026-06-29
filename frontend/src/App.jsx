@@ -1,9 +1,3 @@
-/**
- * App.jsx
- * -------
- * Root application component with header navigation and tab routing.
- */
-
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import "./index.css";
@@ -16,11 +10,11 @@ import Icon from "./components/common/Icon";
 import BgPattern from "./components/common/BgPattern";
 
 const TABS = [
-  { id: "overview", label: "Overview", icon: "layers" },
-  { id: "opportunities", label: "Opportunities", icon: "target" },
-  { id: "macro", label: "Macro Regression", icon: "trendingUp" },
-  { id: "garch", label: "GARCH Volatility", icon: "activity" },
-  { id: "pairs", label: "Pair Trading", icon: "exchange" },
+  { id: "overview",      label: "Overview",        icon: "layers" },
+  { id: "opportunities", label: "Opportunities",   icon: "target" },
+  { id: "macro",         label: "Macro",           icon: "trendingUp" },
+  { id: "garch",         label: "GARCH",           icon: "activity" },
+  { id: "pairs",         label: "Pairs",           icon: "exchange" },
 ];
 
 export default function App() {
@@ -28,16 +22,11 @@ export default function App() {
 
   const renderPanel = () => {
     switch (activeTab) {
-      case "opportunities":
-        return <Recommendations />;
-      case "macro":
-        return <MacroRegression />;
-      case "garch":
-        return <GarchVolatility />;
-      case "pairs":
-        return <PairTrading />;
-      default:
-        return <Dashboard onNavigate={setActiveTab} />;
+      case "opportunities": return <Recommendations />;
+      case "macro":         return <MacroRegression />;
+      case "garch":         return <GarchVolatility />;
+      case "pairs":         return <PairTrading />;
+      default:              return <Dashboard onNavigate={setActiveTab} />;
     }
   };
 
@@ -48,15 +37,16 @@ export default function App() {
         <div className="header-inner">
           <div className="header-brand">
             <div className="header-logo">
-              <Icon name="logo" size={22} strokeWidth={1.8} />
+              <Icon name="logo" size={20} strokeWidth={1.7} />
             </div>
-            <div>
+            <div className="header-brand-text">
               <div className="header-title">
                 Quant<span className="accent">Anomalies</span>
               </div>
               <div className="header-subtitle">Financial Markets Analysis</div>
             </div>
           </div>
+
           <nav className="nav-tabs">
             {TABS.map((tab) => (
               <button
@@ -68,16 +58,21 @@ export default function App() {
                   <motion.span
                     layoutId="nav-active"
                     className="nav-active-bg"
-                    transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                    transition={{ type: "spring", stiffness: 440, damping: 36 }}
                   />
                 )}
                 <span className="nav-tab-inner">
-                  <Icon name={tab.icon} size={16} />
+                  <Icon name={tab.icon} size={15} />
                   <span className="tab-label">{tab.label}</span>
                 </span>
               </button>
             ))}
           </nav>
+
+          <div className="header-live">
+            <span className="live-dot" />
+            Live
+          </div>
         </div>
       </header>
 
@@ -85,10 +80,10 @@ export default function App() {
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.28, ease: "easeOut" }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.24, ease: "easeOut" }}
           >
             {renderPanel()}
           </motion.div>
