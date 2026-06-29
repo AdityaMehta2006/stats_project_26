@@ -29,6 +29,15 @@ frontend/.vite/
 # Downloaded market-data caches (regenerated from Yahoo/FRED on first run)
 backend/data/raw/*.csv
 
+# LaTeX build artifacts (keep the .tex sources and final .pdf)
+*.aux
+*.toc
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+docs/_build_*.log
+
 # Logs
 *.log
 npm-debug.log*

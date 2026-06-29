@@ -1,0 +1,235 @@
+\documentclass[11pt]{article}
+\usepackage{quanttheme}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\tk}[1]{\texttt{#1}}
+
+\begin{document}
+\thispagestyle{empty}
+
+\titlebanner
+  {QuantAnomalies}
+  {Quantitative Anomalies as Market Opportunities}
+  {Progress Presentation \quad\textbullet\quad Statistical \& AI Dashboard for Equity and Forex Markets}
+
+\vspace{1.2em}
+
+\section{Title of the Study}
+\textbf{Quantitative Anomalies as Market Opportunities — A Statistical \& AI
+Dashboard for Equity and Forex Markets.}
+
+\begin{opp}
+In plain terms: textbook finance says markets are ``efficient'' — prices already
+reflect everything, risk never changes, and nothing is predictable. Reality is
+messier, and those cracks in the theory are recurring patterns called
+\textbf{anomalies}. Our project hunts for those anomalies and reframes them as
+\textbf{opportunities}: places where the odds may tilt in a careful observer's favour.
+\end{opp}
+
+\section{Objectives of the Study}
+Each objective targets one well-known market anomaly and turns it into a usable
+opportunity signal.
+
+\begin{enumerate}
+\item \textbf{Macro-driver opportunity.} Measure \emph{which} macroeconomic forces
+(interest rates, inflation, the fear index, oil, gold, the dollar) move an asset's
+returns — and crucially with \emph{what time delay}. If a driver acts weeks later,
+that lag is a window to anticipate moves.
+
+\item \textbf{Risk-regime opportunity.} Model how risk itself rises and falls over
+time (volatility clustering) and detect that crashes happen far more often than a
+bell curve predicts (fat tails). Spotting a ``stormy'' regime early is a chance to
+cut risk — or to recognise unusually cheap calm.
+
+\item \textbf{Mean-reversion opportunity.} Find pairs of currencies whose prices are
+tethered over the long run (cointegration), then flag when they drift unusually far
+apart — history says the gap tends to snap back. This is the basis of
+market-neutral ``statistical arbitrage''.
+
+\item \textbf{Opportunity synthesis (the recommendation engine).} Combine all of the
+above into one automated scanner that ranks what is unusual or actionable
+\emph{right now}, and uses a \textbf{local AI analyst} to explain each finding in
+plain English.
+
+\item \textbf{Accessibility \& robustness.} Make it work for \emph{any} ticker the
+user types, on a reliable data pipeline, presented through a clear, interactive
+dashboard.
+\end{enumerate}
+
+\section{Motivation for Selecting the Topic}
+\begin{itemize}
+\item \textbf{The anomalies are real and well-studied, but rarely made tangible.}
+Lagged macro effects, volatility clustering, fat tails, and cointegration all appear
+in finance literature; we wanted to make them \emph{visible and actionable} rather
+than abstract equations.
+\item \textbf{Reframing risk as opportunity.} The same statistics used to warn about
+risk can also point to opportunity — we wanted a tool that does both.
+\item \textbf{Bridging statistics and modern AI.} We combine classic econometrics
+(regression, GARCH, cointegration) with a \textbf{local large language model} that
+turns numbers into a readable analyst note — private, free to run, and on our own GPU.
+\item \textbf{Learning value.} The project spans real statistical modelling, live
+financial-data engineering, full-stack web development, and on-device AI.
+\end{itemize}
+
+\section{Data \& APIs Used}
+\textit{In place of a questionnaire and a survey sample: our ``instrument'' is a set
+of financial-data APIs, and our ``sample'' is the live market history they return.}
+
+\subsection{A. External data-source APIs (collecting raw market data)}
+\begin{itemize}
+\item \textbf{Yahoo Finance} (via the \tk{yfinance} library) — daily price history
+(2015--2025) for any equity, index, currency pair, future, or crypto. Examples:
+\tk{\textasciicircum{}GSPC} (S\&P 500), \tk{\textasciicircum{}VIX} (volatility index),
+\tk{CL=F} (oil), \tk{GC=F} (gold), \tk{\textasciicircum{}TNX} (10-year Treasury
+yield), \tk{DX-Y.NYB} (US dollar index), and 45 forex pairs.
+\item \textbf{FRED — U.S. Federal Reserve Economic Data} — macroeconomic series:
+CPI (inflation), Fed Funds Rate, and Unemployment. A free mirror, \textbf{DBnomics},
+is a built-in backup so a single outage never stops the study.
+\end{itemize}
+
+\subsection{B. Our own analysis API (FastAPI backend)}
+Turns raw data into results:
+\begin{itemize}
+\item \tk{/api/macro-regression/*} — regression, Granger-causality, correlation, time series
+\item \tk{/api/garch/*} — volatility model, clustering tests, return distribution
+\item \tk{/api/pairs/*} — cointegration tests, best-pair spread \& signals, correlation
+\item \tk{/api/recommendations} — the ranked opportunity scan
+\item \tk{/api/llm/info} — status of the local AI analyst
+\end{itemize}
+
+\subsection{C. Local AI API}
+An on-device \tk{llama.cpp} server (OpenAI-compatible) running the \textbf{Qwen3-4B}
+model on our \textbf{NVIDIA RTX 4050 GPU}, used to explain detected opportunities in
+plain language. No data leaves the machine.
+
+\section{Pilot Study Conducted to Date}
+We have a \textbf{working end-to-end prototype}, validated on real data.
+
+\begin{keybox}
+\textbf{Data pipeline (validated).} Live downloads work for all sources; a corrupted
+early cache (the volatility and oil series had been mixed up) was found and fixed.
+Every series now sits in its correct real-world range — e.g. VIX 9--83, oil $-37$ to
+124, 10-year yield 0.5--4.9\%.
+\end{keybox}
+
+\textbf{Three analysis pillars — working, with sample findings on the S\&P 500:}
+\begin{itemize}
+\item \emph{Macro:} macro factors explain about \textbf{64\%} of monthly return
+variation (R² ≈ 0.64); the model surfaces which factors are significant and at what lag.
+\item \emph{Volatility:} GARCH ``persistence'' ≈ \textbf{0.9955} (shocks fade very
+slowly) and excess kurtosis ≈ \textbf{16} (strong fat tails) — risk is \emph{not}
+constant and crashes are under-estimated by the normal curve.
+\item \emph{Pairs:} among major forex pairs, \textbf{USDCHF/USDJPY} tested
+cointegrated (p ≈ 0.008) with a mean-reversion half-life around 64 days.
+\end{itemize}
+
+\textbf{Recommendation engine (v1 working).} Four detectors (volatility regime, tail
+move, trend, forex mean-reversion) rank opportunities by severity and assign a
+confidence score. The local AI produces a grounded plain-English note in
+≈4 seconds on the GPU (≈28 tokens/sec), citing only the real detected numbers.
+
+\textbf{Dashboard (working).} Interactive web app: search any ticker, pick forex
+pairs, switch time ranges, and read explained results across five tabs (Overview,
+Opportunities, Macro, GARCH, Pair Trading).
+
+\begin{opp}
+\textbf{In short:} the pilot confirms the data, the statistics, the AI-explanation
+layer, and the user interface all work together on live markets. Next steps
+(standardised comparisons, an options / Black–Scholes module, and a back-test of the
+signals) are tracked in the project roadmap.
+\end{opp}
+
+\section{Modules Built So Far}
+
+\subsection*{Backend (Python / FastAPI)}
+\begin{itemize}
+\item \tk{data\_loader.py} — data acquisition (Yahoo Finance, FRED, DBnomics), caching, dataset builders
+\item \tk{analysis/macro\_regression.py} — Pillar 1: OLS lag regression, Granger causality, correlation
+\item \tk{analysis/garch.py} — Pillar 2: GARCH(1,1), volatility clustering, return distribution
+\item \tk{analysis/pairs.py} — Pillar 3: cointegration, spread / z-score, trading signals
+\item \tk{analysis/recommender.py} — the opportunity engine: detectors, ranking, confidence
+\item \tk{llm\_client.py} — provider-agnostic local-LLM client (GPU server + CPU fallback)
+\item \tk{main.py} — FastAPI endpoints tying it all together
+\end{itemize}
+
+\subsection*{Frontend (React + Vite)}
+\begin{itemize}
+\item Five tab panels — Overview, Opportunities, Macro Regression, GARCH Volatility, Pair Trading
+\item Shared components — SVG icon set, info-tooltips, time-range filter, ticker search, forex selector, status states, animated background
+\item Support — chart theme, time-range utilities, data-fetch hook, API client
+\end{itemize}
+
+\section{Future Plans — Expanding the Opportunity Engine}
+Each future module is another \emph{lens} for spotting opportunity. The engine's
+principle stays the same: \textbf{statistics detect, the AI explains}.
+
+\subsection*{1. Options \& Black–Scholes}
+Price European call / put options and their Greeks, and back out the market's
+\textbf{implied volatility}. \textbf{Opportunity:} compare implied volatility with
+our GARCH forecast — when the market pays far more (or less) for risk than the model
+expects, options are ``rich'' or ``cheap''.
+
+\subsection*{2. Valuation — ``is the stock bloated / overpriced?''}
+Pull fundamental ratios (P/E, P/B, P/S, PEG, EV/EBITDA) and compare them with the
+stock's own history and its peers, alongside a technical ``stretch'' check (how far
+price sits above its 200-day average, and RSI). \textbf{Opportunity:} flag names
+``priced for perfection'' (avoid / potential short) versus those ``on sale''
+(potential value buys).
+
+\subsection*{3. More opportunity lenses}
+\begin{itemize}
+\item \textbf{Momentum \& relative strength} — rank a universe by risk-adjusted
+12–1 month momentum to spot rotation leaders and laggards.
+\item \textbf{Oversold bounce} — distance from the 52-week high plus RSI to find
+mean-reversion candidates.
+\item \textbf{Volatility squeeze} — detect compression that often precedes a breakout.
+\item \textbf{Correlation-regime shift} — assets that usually move together
+decoupling (a diversification or pairs opportunity).
+\item \textbf{Seasonality / calendar effects} — turn-of-month and ``sell in May''
+style documented anomalies.
+\item \textbf{Alpha vs beta} — separate market-driven moves from stock-specific mispricing.
+\item \textbf{Unusual volume} — accumulation / distribution versus the average.
+\item \textbf{Risk budgeting} — turn the detected regime into a suggested position size.
+\end{itemize}
+
+\section{Decision Engine: Rules-based vs LLM-based}
+We support \textbf{both}, and today combine them: \emph{rules detect, the LLM
+explains}. A toggle lets the user choose the mode; pure rules is the safe default.
+
+\begin{table}[h]
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\linewidth}{>{\bfseries}l Y Y}
+\toprule
+& \textbf{\color{qnavy}Rules-based} & \textbf{\color{qnavy}LLM-based} \\
+\midrule
+Determinism & Fully deterministic, reproducible & Varies with settings \\
+Explainability & Transparent thresholds & Natural-language reasoning \\
+Numbers & Exact by construction & Must be guarded against errors \\
+Flexibility & Rigid; new rules need code & Synthesises novel combinations \\
+Speed \& cost & Instant, free & ≈4 s on GPU, compute cost \\
+Works offline & Yes & Needs the local model \\
+Best at & Detection \& signals & Explanation \& synthesis \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{opp}
+Our design uses each for what it is good at — rules produce the trustworthy numbers,
+the LLM produces the readable story. A future \textbf{LLM decision-maker} mode would
+let the model also weigh and rank signals (not just explain), kept honest by
+rule-based guardrails and number validation.
+\end{opp}
+
+\section*{Appendix — Each anomaly in one line (layman)}
+\begin{itemize}
+\item \textbf{Lagged macro effect:} \textit{News ripples through markets over weeks,
+not instantly — know the lever and the delay, and you can position ahead.}
+\item \textbf{Volatility clustering:} \textit{Calm days cluster, and so do wild days —
+storms arrive in groups, giving you warning to manage risk.}
+\item \textbf{Fat tails:} \textit{Extreme crashes happen much more often than the
+textbook bell curve says — plan for them.}
+\item \textbf{Cointegration / pairs:} \textit{Two currencies on one leash: when they
+drift far apart, they usually snap back — bet on the gap closing, up market or down.}
+\end{itemize}
+
+\end{document}

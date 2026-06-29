@@ -90,6 +90,21 @@ const PATHS = {
     </>
   ),
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
+  // Opportunities / scanner
+  target: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="12" cy="12" r="0.6" />
+    </>
+  ),
+  // AI / generate
+  sparkles: (
+    <>
+      <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3z" />
+      <path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, strokeWidth = 1.75, className = "", style = {} }) {
