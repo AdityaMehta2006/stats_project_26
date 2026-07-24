@@ -21,6 +21,7 @@ import { InfoTip, LabelWithTip } from "./common/Tooltip";
 import TimeRangeFilter from "./common/TimeRangeFilter";
 import { filterByRange, axisInterval, MONTHLY_RANGES } from "../timeRange";
 import { CHART, SERIES, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
+import { fmtPval, fmtBeta, fmtZ } from "../utils/format";
 
 const container = {
   hidden: { opacity: 0 },
@@ -202,6 +203,100 @@ export default function MacroRegression() {
               </motion.div>
             )}
 
+            {/* Driver Ranking */}
+            {ols.data?.driver_ranking && ols.data.driver_ranking.length > 0 && (
+              <motion.div className="card" variants={item}>
+                <div className="card-header">
+                  <div>
+                    <div className="card-title">
+                      Top Return Drivers
+                      <InfoTip text="Standardized betas ranked by absolute size — each coefficient shows the effect on equity returns per 1 standard deviation move in that factor. Larger = stronger driver. VIX is measured as its monthly log-change." />
+                    </div>
+                    <div className="card-subtitle">Factors ranked by |standardized beta| · {ticker}</div>
+                  </div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Variable</th>
+                        <th>Std. Beta</th>
+                        <th>P-Value</th>
+                        <th>Significant</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ols.data.driver_ranking.slice(0, 12).map((r, i) => (
+                        <tr key={i}>
+                          <td style={{ color: "var(--text-muted)" }}>{i + 1}</td>
+                          <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>{r.variable}</td>
+                          <td style={{ color: r.coefficient > 0 ? CHART.teal : CHART.down, fontFamily: "var(--font-mono)" }}>
+                            {fmtBeta(r.coefficient)}
+                          </td>
+                          <td style={{ fontFamily: "var(--font-mono)" }}>{fmtPval(r.p_value)}</td>
+                          <td>
+                            <span className={`badge ${r.significant ? "success" : "danger"}`}>
+                              {r.significant ? "Yes" : "No"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Factor Current State */}
+            {ols.data?.factor_stats && (
+              <motion.div className="card" variants={item}>
+                <div className="card-header">
+                  <div>
+                    <div className="card-title">
+                      Factor Current State
+                      <InfoTip text="Where each macro factor sits today relative to its own history. Z-score > ±2 indicates an extreme reading. VIX shows its latest monthly log-change." />
+                    </div>
+                    <div className="card-subtitle">Latest z-score and historical percentile for each factor</div>
+                  </div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Factor</th>
+                        <th>Latest Value</th>
+                        <th>Z-Score</th>
+                        <th>Percentile</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(ols.data.factor_stats).map(([factor, stats]) => {
+                        const isExtreme = stats.percentile >= 0.88 || stats.percentile <= 0.12;
+                        const pctLabel = `${(stats.percentile * 100).toFixed(0)}th`;
+                        return (
+                          <tr key={factor}>
+                            <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>{factor}</td>
+                            <td style={{ fontFamily: "var(--font-mono)" }}>{stats.latest_raw.toFixed(4)}</td>
+                            <td style={{ color: Math.abs(stats.latest_z) >= 2 ? CHART.down : "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
+                              {fmtZ(stats.latest_z)}
+                            </td>
+                            <td style={{ fontFamily: "var(--font-mono)" }}>{pctLabel}</td>
+                            <td>
+                              <span className={`badge ${isExtreme ? "danger" : "info"}`}>
+                                {isExtreme ? "Extreme" : "Normal"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </motion.div>
+            )}
+
             {/* OLS Coefficients */}
             {ols.data?.coefficients && (
               <motion.div className="card" variants={item}>
@@ -229,7 +324,10 @@ export default function MacroRegression() {
                         labelStyle={tooltipLabelStyle}
                         itemStyle={tooltipItemStyle}
                         cursor={{ fill: "rgba(148,163,184,0.06)" }}
-                        formatter={(val, name, props) => [`${val} (p=${props.payload.p_value})`, "Coefficient"]}
+                        formatter={(val, name, props) => [
+                          `${fmtBeta(val)} (p=${fmtPval(props.payload.p_value)})`,
+                          "Std. Beta",
+                        ]}
                       />
                       <Bar dataKey="coefficient" radius={[0, 4, 4, 0]}>
                         {ols.data.coefficients

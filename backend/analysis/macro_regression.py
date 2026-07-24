@@ -2,18 +2,65 @@
 macro_regression.py
 -------------------
 Pillar 1: Macro Factor & Lag Regression
-- OLS with lagged macro factors for any ticker
-- Granger causality tests
-- Correlation heatmap data
+
+Factors are z-score standardized before OLS so that all regression
+coefficients are directly comparable "standardized betas" — the effect
+on equity returns per one standard deviation move in each factor.
+
+VIX is transformed to its monthly log-change (Δ log VIX) before
+standardizing, which produces a stationary series appropriate for OLS.
+
+The raw factor levels are kept separate (for time-series plotting) so
+that the user always sees real values in charts.
 """
 
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import grangercausalitytests
 import statsmodels.api as sm
 
 from data_loader import build_macro_dataset
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _prepare_factors(df: pd.DataFrame, target: str) -> tuple:
+    """
+    Returns (df_std, factor_stats) where:
+      - df_std: copy of df with factor columns z-scored (target unchanged)
+      - factor_stats: dict {col: {mean, std, latest_raw, latest_z}} for the
+        raw (pre-standardization) series, used by the dislocation detector
+    VIX is replaced by its monthly log-change before z-scoring.
+    """
+    df = df.copy()
+    factors = [c for c in df.columns if c != target]
+
+    # VIX: level → monthly log-return (better stationarity)
+    if "VIX" in factors:
+        df["VIX"] = np.log(df["VIX"] / df["VIX"].shift(1))
+        df.dropna(inplace=True)
+
+    factor_stats = {}
+    for col in factors:
+        raw = df[col]
+        mu = float(raw.mean())
+        sigma = float(raw.std())
+        latest_raw = float(raw.iloc[-1])
+        z = (latest_raw - mu) / sigma if sigma > 0 else 0.0
+        # historical percentile of the latest value
+        pct = float((raw.iloc[:-1] < latest_raw).mean()) if len(raw) > 1 else 0.5
+        factor_stats[col] = {
+            "mean": round(mu, 6),
+            "std": round(sigma, 6),
+            "latest_raw": round(latest_raw, 6),
+            "latest_z": round(z, 3),
+            "percentile": round(pct, 3),
+        }
+        df[col] = (raw - mu) / (sigma if sigma > 0 else 1)
+
+    return df, factor_stats
 
 
 def _add_lags(df: pd.DataFrame, target_col: str, factor_cols: list, max_lag: int = 3):
@@ -27,16 +74,27 @@ def _add_lags(df: pd.DataFrame, target_col: str, factor_cols: list, max_lag: int
     return result
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def run_ols_lag_regression(ticker: str = "^GSPC", max_lag: int = 3) -> dict:
     """
-    Run OLS: Equity_Return ~ macro factors with lags 0..max_lag.
-    Returns coefficients, p-values, R², and model comparison by lag.
+    OLS: Equity_Return ~ z-scored macro factors with lags 0..max_lag.
+
+    Coefficients are standardized betas (effect per 1-SD move in each factor),
+    making them directly comparable across factors with different units.
+
+    Returns coefficients, p-values, R², lag comparison, and a driver ranking
+    sorted by absolute standardized coefficient.
     """
-    df = build_macro_dataset(ticker)
+    df_raw = build_macro_dataset(ticker)
     target = "Equity_Return"
+
+    df, factor_stats = _prepare_factors(df_raw, target)
     factors = [c for c in df.columns if c != target]
 
-    # Model comparison across lag depths
+    # --- Model comparison across lag depths ---
     lag_results = []
     for lag in range(0, max_lag + 1):
         data = df.copy()
@@ -62,7 +120,7 @@ def run_ols_lag_regression(ticker: str = "^GSPC", max_lag: int = 3) -> dict:
             "n_obs": int(model.nobs),
         })
 
-    # Full model with max_lag
+    # --- Full model at max_lag ---
     data_full = _add_lags(df, target, factors, max_lag)
     X_full = sm.add_constant(data_full.drop(columns=[target]))
     y_full = data_full[target]
@@ -75,26 +133,88 @@ def run_ols_lag_regression(ticker: str = "^GSPC", max_lag: int = 3) -> dict:
         coefficients.append({
             "variable": name,
             "coefficient": round(float(coef), 6),
-            "p_value": round(float(pval), 4),
+            "p_value": round(float(pval), 6),
             "significant": bool(pval < 0.05),
         })
+
+    # Driver ranking: sort significant betas by absolute effect (exclude const)
+    sig_coefs = [c for c in coefficients if c["variable"] != "const"]
+    driver_ranking = sorted(sig_coefs, key=lambda c: abs(c["coefficient"]), reverse=True)
+
+    # Latest residual info (useful for the dislocation detector)
+    residuals = full_model.resid.values
+    resid_std = float(np.std(residuals))
+    latest_resid_z = round(float(residuals[-1]) / resid_std, 3) if resid_std > 0 else 0.0
 
     return {
         "ticker": ticker,
         "lag_comparison": lag_results,
         "coefficients": coefficients,
+        "driver_ranking": driver_ranking,
         "r_squared": round(full_model.rsquared, 4),
         "adj_r_squared": round(full_model.rsquared_adj, 4),
+        "factor_stats": factor_stats,
+        "latest_residual_z": latest_resid_z,
+        "note": "Coefficients are standardized betas (per 1-SD move in each factor, with VIX as log-change).",
+    }
+
+
+def get_macro_diagnostics(ticker: str = "^GSPC") -> dict:
+    """
+    Lightweight diagnostic used by the recommender engine.
+
+    Runs a single-lag OLS with standardized factors and returns:
+    - latest_residual_z: how far the latest return is from the model's prediction
+    - extreme_factors: any factor currently in the top/bottom 12th percentile
+    - factor_stats: per-factor z-score, percentile, raw value
+    """
+    df_raw = build_macro_dataset(ticker)
+    target = "Equity_Return"
+    df, factor_stats = _prepare_factors(df_raw, target)
+    factors = [c for c in df.columns if c != target]
+
+    # OLS with lag 0 (fast, used only for residuals)
+    X = sm.add_constant(df[factors])
+    y = df[target]
+    model = sm.OLS(y, X).fit()
+
+    residuals = model.resid.values
+    resid_std = float(np.std(residuals))
+    latest_resid_z = round(float(residuals[-1]) / resid_std, 3) if resid_std > 0 else 0.0
+    latest_actual = round(float(y.iloc[-1]), 4)
+    latest_predicted = round(float(model.fittedvalues.iloc[-1]), 4)
+
+    # Factors at historical extremes (threshold: outside middle 76%)
+    extreme = {
+        k: v for k, v in factor_stats.items()
+        if v["percentile"] >= 0.88 or v["percentile"] <= 0.12
+    }
+
+    return {
+        "latest_residual_z": latest_resid_z,
+        "latest_actual_return": latest_actual,
+        "latest_predicted_return": latest_predicted,
+        "extreme_factors": extreme,
+        "factor_stats": factor_stats,
+        "r_squared": round(float(model.rsquared), 4),
+        "n_obs": int(model.nobs),
     }
 
 
 def run_granger_causality(ticker: str = "^GSPC", max_lag: int = 4) -> dict:
     """
-    Test Granger causality: does each macro factor Granger-cause equity returns?
-    Returns p-values for each factor at each lag.
+    Granger causality: does each macro factor predict equity returns?
+    Uses raw (non-standardized) factor values — Granger tests are invariant
+    to monotone rescaling so z-scoring wouldn't change the result.
     """
     df = build_macro_dataset(ticker)
     target = "Equity_Return"
+
+    # VIX: log-change for stationarity
+    if "VIX" in df.columns:
+        df["VIX"] = np.log(df["VIX"] / df["VIX"].shift(1))
+        df.dropna(inplace=True)
+
     factors = [c for c in df.columns if c != target]
 
     results = []
@@ -103,14 +223,14 @@ def run_granger_causality(ticker: str = "^GSPC", max_lag: int = 4) -> dict:
         if len(subset) < max_lag + 10:
             continue
         try:
-            gc = grangercausalitytests(subset, maxlag=max_lag)
+            gc = grangercausalitytests(subset, maxlag=max_lag, verbose=False)
             for lag in range(1, max_lag + 1):
                 f_test = gc[lag][0]["ssr_ftest"]
                 results.append({
                     "factor": factor,
                     "lag": lag,
                     "f_stat": round(float(f_test[0]), 4),
-                    "p_value": round(float(f_test[1]), 4),
+                    "p_value": round(float(f_test[1]), 6),
                     "significant": bool(f_test[1] < 0.05),
                 })
         except Exception:
@@ -121,8 +241,9 @@ def run_granger_causality(ticker: str = "^GSPC", max_lag: int = 4) -> dict:
 
 def run_correlation_heatmap(ticker: str = "^GSPC", max_lag: int = 3) -> dict:
     """
-    Compute correlation matrix between equity returns and lagged macro factors.
-    Returns data suitable for a heatmap visualization.
+    Lagged correlation heatmap: correlation of equity return with each
+    factor shifted 0..max_lag months. Uses raw factor values so the
+    heatmap shows real-world correlations.
     """
     df = build_macro_dataset(ticker)
     target = "Equity_Return"
@@ -143,7 +264,7 @@ def run_correlation_heatmap(ticker: str = "^GSPC", max_lag: int = 3) -> dict:
 
 
 def get_macro_time_series(ticker: str = "^GSPC") -> dict:
-    """Return the raw macro dataset as time series for plotting."""
+    """Raw macro time series for the chart (always raw, never standardized)."""
     df = build_macro_dataset(ticker)
     series = {}
     for col in df.columns:

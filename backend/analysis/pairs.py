@@ -7,6 +7,12 @@ Pillar 3: Pair Trading in Forex (or any asset pairs)
 - Buy/sell signal generation
 - Half-life of mean reversion
 - Supports custom forex pair selection
+
+All cointegration tests and OLS hedge-ratio estimation use LOG PRICES
+(np.log) so that the hedge ratio is scale-invariant — otherwise a pair
+like EURUSD (~1.1) vs USDJPY (~150) produces a meaningless hedge ratio
+close to zero when raw prices are used.  Raw prices are kept separately
+for the price chart so users always see real exchange rates.
 """
 
 import numpy as np
@@ -23,14 +29,17 @@ def run_cointegration_tests(pair_labels: list = None) -> dict:
     Test cointegration for all combinations of forex pairs using Engle-Granger.
     pair_labels: optional list like ["EURUSD", "GBPUSD", ...].
     Returns a matrix of p-values.
+
+    Uses log prices so results are meaningful across pairs with different scales.
     """
     forex = get_forex(pair_labels).dropna()
+    log_forex = np.log(forex)
     pairs_list = list(forex.columns)
 
     results = []
     for a, b in combinations(pairs_list, 2):
         try:
-            score, pvalue, _ = coint(forex[a], forex[b])
+            score, pvalue, _ = coint(log_forex[a], log_forex[b])
             results.append({
                 "pair_a": a,
                 "pair_b": b,
@@ -42,7 +51,6 @@ def run_cointegration_tests(pair_labels: list = None) -> dict:
         except Exception:
             continue
 
-    # Sort by p-value
     results.sort(key=lambda x: x["p_value"])
 
     return {
@@ -50,15 +58,19 @@ def run_cointegration_tests(pair_labels: list = None) -> dict:
         "pairs_tested": len(results),
         "cointegrated_pairs": sum(1 for r in results if r["cointegrated"]),
         "selected_pairs": pairs_list,
+        "spread_type": "log",
     }
 
 
 def get_best_pair_analysis(pair_labels: list = None) -> dict:
     """
     Find the best cointegrated pair and compute:
-    - Spread time series
+    - Spread time series (in log-price space)
     - Z-score with signals
     - Half-life of mean reversion
+
+    OLS and cointegration use log prices; raw prices are kept for the
+    price chart so users see real exchange rates.
     """
     forex = get_forex(pair_labels).dropna()
     pairs_list = list(forex.columns)
@@ -66,12 +78,14 @@ def get_best_pair_analysis(pair_labels: list = None) -> dict:
     if len(pairs_list) < 2:
         return {"error": "Need at least 2 forex pairs for analysis"}
 
-    # Find best cointegrated pair
+    log_forex = np.log(forex)
+
+    # Find best cointegrated pair (on log prices)
     best_pair = None
     best_pvalue = 1.0
     for a, b in combinations(pairs_list, 2):
         try:
-            _, pvalue, _ = coint(forex[a], forex[b])
+            _, pvalue, _ = coint(log_forex[a], log_forex[b])
             if pvalue < best_pvalue:
                 best_pvalue = pvalue
                 best_pair = (a, b)
@@ -83,13 +97,13 @@ def get_best_pair_analysis(pair_labels: list = None) -> dict:
 
     a, b = best_pair
 
-    # OLS to find hedge ratio: P_a = beta * P_b + alpha + epsilon
-    X = sm.add_constant(forex[b])
-    model = sm.OLS(forex[a], X).fit()
+    # OLS on log prices: log(P_a) = beta * log(P_b) + alpha + epsilon
+    X = sm.add_constant(log_forex[b])
+    model = sm.OLS(log_forex[a], X).fit()
     hedge_ratio = float(model.params.iloc[1])
 
-    # Spread
-    spread = forex[a] - hedge_ratio * forex[b]
+    # Spread in log space
+    spread = log_forex[a] - hedge_ratio * log_forex[b]
 
     # Rolling z-score (60-day window)
     window = 60
@@ -132,7 +146,7 @@ def get_best_pair_analysis(pair_labels: list = None) -> dict:
     lambda_val = float(hl_model.params.iloc[1])
     half_life = -np.log(2) / lambda_val if lambda_val < 0 else float("inf")
 
-    # Time series for plotting (subsample)
+    # Time series for plotting (log-space spread + z-score, subsampled)
     step = max(1, len(z_score) // 800)
     spread_series = []
     z_reindexed = z_score.reindex(spread.index)
@@ -142,7 +156,7 @@ def get_best_pair_analysis(pair_labels: list = None) -> dict:
             entry["z_score"] = round(float(z), 4)
         spread_series.append(entry)
 
-    # Price series for the pair
+    # Price series: raw exchange rates for display
     price_series = []
     for d, pa, pb in list(zip(forex.index, forex[a].values, forex[b].values))[::step]:
         price_series.append({
@@ -161,13 +175,18 @@ def get_best_pair_analysis(pair_labels: list = None) -> dict:
         "price_series": price_series,
         "signals": signals,
         "total_signals": len(signals),
+        "spread_type": "log",
     }
 
 
 def get_forex_correlation(pair_labels: list = None) -> dict:
-    """Return correlation matrix of forex pairs for a heatmap."""
+    """
+    Correlation matrix of log-returns for forex pairs (more stationary
+    and informative than raw-price correlations).
+    """
     forex = get_forex(pair_labels).dropna()
-    corr = forex.corr()
+    log_returns = np.log(forex / forex.shift(1)).dropna()
+    corr = log_returns.corr()
 
     rows = []
     for a in corr.index:
