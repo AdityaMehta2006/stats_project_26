@@ -7,8 +7,11 @@ All endpoints accept a dynamic ticker/pair selection via query params.
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from contextlib import asynccontextmanager
 from typing import List, Optional
+import json
+import threading
 import traceback
 
 import sys, os
@@ -18,6 +21,7 @@ from data_loader import (
     validate_ticker,
     search_tickers,
     get_available_forex,
+    NoDataError,
 )
 from analysis.macro_regression import (
     run_ols_lag_regression,
@@ -39,11 +43,28 @@ from analysis.pairs import (
 from analysis.recommender import generate_recommendations
 from analysis.black_scholes import analyze_option
 import llm_client
+import engine
+
+
+def _startup_warm():
+    """Pre-compute the universe and poke the model, so the first user request
+    isn't the one that pays for both."""
+    llm_client.prewarm()
+    engine.warm()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Daemon thread: a ~20s cold sweep must not hold up the port binding.
+    threading.Thread(target=_startup_warm, daemon=True).start()
+    yield
+
 
 app = FastAPI(
     title="Quantitative Anomalies API",
     description="Backend for financial markets anomaly analysis dashboard — supports any ticker",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # CORS — allow React dev server
@@ -54,6 +75,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# An unknown symbol is a user typo, not a server fault. Answer 404 with
+# something readable — this used to surface as a 500 quoting an internal cache
+# key ("Download returned empty data for 'equity_ZZZNOTREAL'").
+@app.exception_handler(NoDataError)
+async def no_data_handler(request: Request, exc: NoDataError):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "No market data for that symbol.",
+            "detail": "Check the ticker and try again — search suggests valid symbols as you type.",
+        },
+    )
 
 
 # Global exception handler — returns JSON errors with CORS headers
@@ -232,6 +267,76 @@ def recommendations(
 
 
 # ---------------------------------------------------------------------------
+# Decision engine
+#
+# These sit above the per-module endpoints above — they do not replace them.
+# Every signal carries `source` + `asset` so the UI can drill from a verdict
+# straight into the macro / GARCH / pairs endpoint that produced it.
+# ---------------------------------------------------------------------------
+
+def _pairs(pairs: Optional[str]):
+    return [p.strip() for p in pairs.split(",")] if pairs else None
+
+
+@app.get("/api/engine/feed")
+def engine_feed(
+    pairs: Optional[str] = Query(None, description="Comma-separated forex pairs; omit for defaults"),
+    limit: int = Query(12, description="Max signals in the ranked feed"),
+):
+    """Ranked cross-asset opportunities. Served from warm caches after startup."""
+    return engine.scan_universe(pairs=_pairs(pairs), limit=limit)
+
+
+@app.get("/api/engine/asset")
+def engine_asset(
+    ticker: str = Query("^GSPC", description="Any Yahoo ticker — need not be in the universe"),
+    pairs: Optional[str] = Query(None, description="Comma-separated forex pairs; omit for defaults"),
+):
+    """Fused verdict plus every signal for one asset, with per-detector diagnostics."""
+    return engine.scan_asset(ticker, pairs=_pairs(pairs))
+
+
+@app.get("/api/engine/narrate")
+def engine_narrate(
+    ticker: str = Query("^GSPC", description="Asset to explain"),
+    pairs: Optional[str] = Query(None, description="Comma-separated forex pairs; omit for defaults"),
+):
+    """
+    Server-sent events: the model's own stance first (~10 tokens in), then the
+    explanation streamed token by token, then a `done` frame carrying the
+    number-guardrail result. The computed verdict is already on screen by the
+    time this is called — nothing here blocks first paint.
+    """
+    scan = engine.scan_asset(ticker, pairs=_pairs(pairs))
+
+    def events():
+        try:
+            for event, data in engine.narrate_stream(scan):
+                yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
+        except Exception as e:  # noqa: BLE001 — a stream can't return a 500 mid-flight
+            yield f"event: done\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/engine/status")
+def engine_status():
+    """Data freshness, warm state, and LLM health — drives the UI's status strip."""
+    info = engine._garch_tier.cache_info()
+    return {
+        "llm": llm_client.info(),
+        "universe": engine.UNIVERSE,
+        "data_asof": engine._data_date("^GSPC"),
+        "warm_assets": info.currsize,
+        "warm": info.currsize >= len(engine.UNIVERSE),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Options — Black-Scholes
 # ---------------------------------------------------------------------------
 
@@ -252,4 +357,7 @@ def options_black_scholes(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    # reload=True requires an import string, not the app object — passing the
+    # object made `python main.py` exit immediately with
+    # "You must pass the application as an import string to enable 'reload'".
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

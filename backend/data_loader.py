@@ -9,9 +9,12 @@ Supports any ticker available on Yahoo Finance or any FRED series.
 import os
 import re
 import ssl
+import threading
+import time
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date, timedelta
+from functools import lru_cache
 
 # ---------------------------------------------------------------------------
 # SSL workaround for Anaconda environments with broken cert chains.
@@ -52,7 +55,33 @@ for f in os.listdir(DATA_DIR):
         os.remove(fpath)
 
 START = "2015-01-01"
-END = "2025-12-31"
+
+# A cached CSV older than this is refreshed on next access. Daily bars settle
+# after each close, so anything inside a day is still current.
+CACHE_MAX_AGE_HOURS = 18
+
+
+def _end() -> str:
+    """Rolling end date. yfinance treats `end` as exclusive, hence tomorrow."""
+    return (date.today() + timedelta(days=1)).isoformat()
+
+
+# yfinance is NOT thread-safe: concurrent yf.download() calls share session
+# state and will silently return one ticker's data for another. That is how
+# the caches got cross-seeded before (TODO §6 — VIX holding S&P data), and a
+# threaded scan reproduces it immediately. Downloads are therefore serialized.
+# Cached reads stay fully parallel, so this only costs on a cold fetch.
+# ponytail: one global lock, not per-ticker — downloads are rare and I/O bound.
+_download_lock = threading.Lock()
+
+
+class NoDataError(ValueError):
+    """
+    The source returned nothing for this symbol — almost always a typo or a
+    ticker that doesn't exist, not a server fault. Distinguished from a generic
+    ValueError so the API can answer 404 with a readable message instead of a
+    500 quoting an internal cache key.
+    """
 
 
 
@@ -70,21 +99,45 @@ def _cache_path(name: str) -> str:
 
 
 def _load_or_download(name: str, downloader):
-    """Load from CSV cache, or download and cache."""
+    """
+    Load from CSV cache, or download and cache.
+
+    A cache older than CACHE_MAX_AGE_HOURS is refreshed, but a *failed* refresh
+    falls back to the stale copy: a rate-limited Yahoo should cost us freshness,
+    not take the endpoint down.
+    """
     path = _cache_path(name)
+    stale = None
     if os.path.exists(path):
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         # Ensure DatetimeIndex
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index, errors="coerce")
             df = df[df.index.notna()]
-        if len(df) > 0:
+        if len(df) == 0:
+            os.remove(path)  # empty/corrupted, re-download
+        elif (time.time() - os.path.getmtime(path)) / 3600 < CACHE_MAX_AGE_HOURS:
             return df
-        # Cached file is empty/corrupted, re-download
-        os.remove(path)
-    df = downloader()
-    if df is None or len(df) == 0:
-        raise ValueError(f"Download returned empty data for '{name}'")
+        else:
+            stale = df
+
+    try:
+        with _download_lock:
+            # Re-check under the lock: while we queued, another thread may have
+            # already fetched and written this exact file.
+            if os.path.exists(path) and (time.time() - os.path.getmtime(path)) / 3600 < CACHE_MAX_AGE_HOURS:
+                fresh = pd.read_csv(path, index_col=0, parse_dates=True)
+                if len(fresh) > 0:
+                    return fresh
+            df = downloader()
+        if df is None or len(df) == 0:
+            raise NoDataError(f"Download returned empty data for '{name}'")
+    except Exception as e:  # noqa: BLE001 — stale data beats no data
+        if stale is not None:
+            print(f"[data_loader] refresh failed for '{name}', serving cached copy: {e}")
+            os.utime(path, None)  # back off, don't retry on every request
+            return stale
+        raise
     df.to_csv(path)
     return df
 
@@ -143,11 +196,17 @@ def search_tickers(query: str) -> list:
 # Yahoo Finance downloads — dynamic ticker support
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=64)
 def get_equity_data(ticker: str = "^GSPC") -> pd.DataFrame:
-    """Download daily OHLCV for any Yahoo Finance ticker."""
+    """
+    Download daily OHLCV for any Yahoo Finance ticker.
+
+    Memoized: callers share one frame per ticker per process. Treat the result
+    as read-only — copy before mutating (see refresh_all to invalidate).
+    """
     cache_name = f"equity_{_safe_filename(ticker)}"
     def _dl():
-        data = yf.download(ticker, start=START, end=END, progress=False)
+        data = yf.download(ticker, start=START, end=_end(), progress=False)
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
         return data
@@ -184,7 +243,7 @@ def _download_fred(series_id: str, name: str) -> pd.DataFrame:
     }
     url = (
         f"https://fred.stlouisfed.org/graph/fredgraph.csv"
-        f"?id={series_id}&cosd={START}&coed={END}"
+        f"?id={series_id}&cosd={START}&coed={_end()}"
     )
 
     def _dl():
@@ -219,7 +278,7 @@ def _download_fred(series_id: str, name: str) -> pd.DataFrame:
             doc = resp.json()["series"]["docs"][0]
             s = pd.Series(doc["value"], index=pd.to_datetime(doc["period"]))
             s = pd.to_numeric(s, errors="coerce").dropna()
-            s = s[(s.index >= START) & (s.index <= END)]
+            s = s[(s.index >= START) & (s.index <= _end())]
             if len(s) > 0:
                 return s.to_frame(series_id)
         except Exception as e:
@@ -228,7 +287,7 @@ def _download_fred(series_id: str, name: str) -> pd.DataFrame:
         # Method 3: pandas_datareader fallback
         try:
             from pandas_datareader import data as pdr
-            df = pdr.DataReader(series_id, "fred", START, END)
+            df = pdr.DataReader(series_id, "fred", START, _end())
             if len(df) > 0:
                 return df
         except Exception as e:
@@ -324,6 +383,12 @@ def get_forex(pair_labels: list = None) -> pd.DataFrame:
     pair_labels: list of friendly names like ["EURUSD", "GBPUSD", ...].
                  If None, uses DEFAULT_FOREX_PAIRS.
     """
+    # lru_cache needs a hashable key; a list isn't one.
+    return _get_forex_cached(tuple(pair_labels) if pair_labels else None)
+
+
+@lru_cache(maxsize=32)
+def _get_forex_cached(pair_labels: tuple = None) -> pd.DataFrame:
     if pair_labels is None:
         pairs_map = DEFAULT_FOREX_PAIRS
     else:
@@ -340,7 +405,7 @@ def get_forex(pair_labels: list = None) -> pd.DataFrame:
     cache_key = "forex_" + "_".join(sorted(pairs_map.keys()))
     def _dl():
         tickers = list(pairs_map.values())
-        data = yf.download(tickers, start=START, end=END, progress=False)
+        data = yf.download(tickers, start=START, end=_end(), progress=False)
         if isinstance(data.columns, pd.MultiIndex):
             close = data["Close"]
         else:
@@ -367,9 +432,13 @@ def _monthly_log_return(ticker: str) -> pd.Series:
     return np.log(px / px.shift(1)).dropna()
 
 
+@lru_cache(maxsize=16)
 def build_macro_dataset(ticker: str = "^GSPC") -> pd.DataFrame:
     """
     Build a monthly-frequency dataset for any equity ticker.
+
+    Memoized — this composes 9 separate downloads, so it is by far the most
+    expensive loader. Treat the result as read-only; copy before mutating.
 
     Each macro factor is fetched defensively: if a single data source is
     unavailable, that factor is skipped (with a log line) rather than failing
@@ -416,9 +485,19 @@ def build_macro_dataset(ticker: str = "^GSPC") -> pd.DataFrame:
     return df
 
 
+@lru_cache(maxsize=64)
 def build_equity_returns(ticker: str = "^GSPC") -> pd.Series:
-    """Daily log returns of any equity ticker."""
+    """Daily log returns of any equity ticker. Memoized — treat as read-only."""
     eq = get_equity_data(ticker)["Close"]
     returns = np.log(eq / eq.shift(1)).dropna()
     returns.name = f"{ticker}_LogReturn"
     return returns
+
+
+def refresh_all():
+    """
+    Drop every memoized frame so the next access re-reads disk (and re-checks
+    staleness). Call this to force-refresh data without restarting the server.
+    """
+    for fn in (get_equity_data, _get_forex_cached, build_macro_dataset, build_equity_returns):
+        fn.cache_clear()

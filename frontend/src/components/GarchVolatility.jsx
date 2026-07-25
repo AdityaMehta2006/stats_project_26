@@ -14,14 +14,15 @@ import {
   AreaChart, Area, Cell, ReferenceLine
 } from "recharts";
 import useApiData from "../hooks/useApiData";
+import { useTicker } from "../ticker";
 import { getGarchFit, getGarchClustering, getGarchDistribution, getGarchCompare } from "../api";
-import { LoadingState, ErrorState } from "./common/StatusStates";
+import { ErrorState, StatsSkeleton, ChartSkeleton } from "./common/StatusStates";
 import TickerSearch from "./common/TickerSearch";
 import Icon from "./common/Icon";
 import { InfoTip, LabelWithTip } from "./common/Tooltip";
 import TimeRangeFilter from "./common/TimeRangeFilter";
 import { filterByRange, axisInterval } from "../timeRange";
-import { CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
+import { CHART, SERIES, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 
 const container = {
   hidden: { opacity: 0 },
@@ -33,22 +34,27 @@ const item = {
 };
 
 export default function GarchVolatility() {
-  const [ticker, setTicker] = useState("^GSPC");
+  const { ticker, setTicker } = useTicker();
 
-  const garch = useApiData(() => getGarchFit(ticker), [ticker]);
-  const clustering = useApiData(() => getGarchClustering(ticker), [ticker]);
-  const dist = useApiData(() => getGarchDistribution(ticker), [ticker]);
-  const compare = useApiData(() => getGarchCompare(ticker), [ticker]);
+  const garch = useApiData(() => getGarchFit(ticker), [ticker], "garch-fit");
+  const clustering = useApiData(() => getGarchClustering(ticker), [ticker], "garch-clust");
+  const dist = useApiData(() => getGarchDistribution(ticker), [ticker], "garch-dist");
+  const compare = useApiData(() => getGarchCompare(ticker), [ticker], "garch-cmp");
 
   const loading = garch.loading || clustering.loading || dist.loading || compare.loading;
   const error = garch.error || clustering.error || dist.error || compare.error;
+
+  const hasData = Boolean(garch.data || clustering.data || dist.data || compare.data);
+  const firstLoad = loading && !hasData;
+  const refetching = loading && hasData;
 
   const [range, setRange] = useState("1Y");
   const volData = useMemo(() => filterByRange(garch.data?.conditional_volatility || [], range), [garch.data, range]);
   const retData = useMemo(() => filterByRange(garch.data?.returns || [], range), [garch.data, range]);
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show">
+    <motion.div variants={container} initial="hidden" animate="show"
+      className={refetching ? "is-refetching" : undefined}>
       <motion.div className="section-header" variants={item}>
         <div className="section-ico garch"><Icon name="activity" size={24} /></div>
         <div>
@@ -77,10 +83,18 @@ export default function GarchVolatility() {
         </div>
       </motion.div>
 
-      {loading && <LoadingState message={`Fitting GARCH model for ${ticker}…`} subtext="This may take a moment for new tickers" />}
-      {error && !loading && <ErrorState message={error} onRetry={() => { garch.reload(); clustering.reload(); dist.reload(); compare.reload(); }} />}
+      {firstLoad && (
+        <>
+          <StatsSkeleton boxes={5} />
+          <div className="charts-grid">
+            <ChartSkeleton />
+            <ChartSkeleton />
+          </div>
+        </>
+      )}
+      {error && !firstLoad && <ErrorState message={error} onRetry={() => { garch.reload(); clustering.reload(); dist.reload(); compare.reload(); }} />}
 
-      {!loading && !error && (
+      {!firstLoad && !error && (
         <>
           {garch.data && (
             <motion.div className="stats-grid" variants={item}>
@@ -111,7 +125,7 @@ export default function GarchVolatility() {
               {dist.data?.descriptive_stats && (
                 <>
                   <div className="stat-box">
-                    <div className={`stat-value ${dist.data.descriptive_stats.kurtosis > 3 ? "negative" : "positive"}`}>
+                    <div className="stat-value">
                       {dist.data.descriptive_stats.kurtosis}
                     </div>
                     <div className="stat-label">
@@ -151,15 +165,15 @@ export default function GarchVolatility() {
                     <AreaChart data={volData}>
                       <defs>
                         <linearGradient id="volGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={CHART.teal} stopOpacity={0.35} />
-                          <stop offset="95%" stopColor={CHART.teal} stopOpacity={0} />
+                          <stop offset="5%" stopColor={SERIES[2]} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={SERIES[2]} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(volData.length)} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(volData.length)}  minTickGap={24} tickMargin={8} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }}  tickMargin={6} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
-                      <Area type="monotone" dataKey="volatility" stroke={CHART.teal} fill="url(#volGradient)" strokeWidth={1.6} name="Cond. Volatility (σ)" />
+                      <Area type="monotone" dataKey="volatility" stroke={CHART.ink} fill="url(#volGradient)" strokeWidth={1.6} name="Cond. Volatility (σ)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -182,8 +196,8 @@ export default function GarchVolatility() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={retData} barSize={1.5}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(retData.length)} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(retData.length)}  minTickGap={24} tickMargin={8} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }}  tickMargin={6} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                       <ReferenceLine y={0} stroke={CHART.axis} strokeDasharray="3 3" />
                       <Bar dataKey="return" name="Return (%)" radius={0}>
@@ -218,10 +232,10 @@ export default function GarchVolatility() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={dist.data.histogram} barSize={6}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="bin_mid" stroke={CHART.axis} tick={{ fontSize: 10 }} label={{ value: "Return (%)", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 11 }} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
-                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "rgba(148,163,184,0.06)" }} formatter={(v) => [v, "Count"]} />
-                      <Bar dataKey="count" fill={CHART.cyan} radius={[2, 2, 0, 0]} opacity={0.85} />
+                      <XAxis dataKey="bin_mid" stroke={CHART.axis} tick={{ fontSize: 10 }} label={{ value: "Return (%)", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 11 }}  minTickGap={24} tickMargin={8} height={52} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }}  tickMargin={6} />
+                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "var(--surface-sunk)" }} formatter={(v) => [v, "Count"]} />
+                      <Bar dataKey="count" fill={SERIES[3]} radius={[2, 2, 0, 0]} opacity={0.85} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -244,14 +258,14 @@ export default function GarchVolatility() {
                   <ResponsiveContainer width="100%" height="100%">
                     <ScatterChart margin={{ left: 10, right: 20, top: 10, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="theoretical" name="Theoretical" stroke={CHART.axis} tick={{ fontSize: 10 }} label={{ value: "Theoretical Quantiles", position: "bottom", offset: 0, fill: CHART.axis, fontSize: 11 }} />
-                      <YAxis dataKey="actual" name="Actual" stroke={CHART.axis} tick={{ fontSize: 10 }} label={{ value: "Sample Quantiles", angle: -90, position: "insideLeft", fill: CHART.axis, fontSize: 11 }} />
+                      <XAxis dataKey="theoretical" name="Theoretical" stroke={CHART.axis} tick={{ fontSize: 10 }} label={{ value: "Theoretical Quantiles", position: "bottom", offset: 0, fill: CHART.axis, fontSize: 11 }}  minTickGap={24} tickMargin={8} height={52} />
+                      <YAxis dataKey="actual" name="Actual" stroke={CHART.axis} tick={{ fontSize: 10 }} label={{ value: "Sample Quantiles", angle: -90, position: "insideLeft", fill: CHART.axis, fontSize: 11 }}  tickMargin={6} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ strokeDasharray: "3 3" }} />
-                      <Scatter data={dist.data.qq_plot} fill={CHART.teal} fillOpacity={0.6} r={2} />
+                      <Scatter data={dist.data.qq_plot} fill={SERIES[3]} fillOpacity={0.6} r={2} />
                       <ReferenceLine segment={[
                         { x: dist.data.qq_plot[0]?.theoretical, y: dist.data.qq_plot[0]?.theoretical },
                         { x: dist.data.qq_plot[dist.data.qq_plot.length - 1]?.theoretical, y: dist.data.qq_plot[dist.data.qq_plot.length - 1]?.theoretical }
-                      ]} stroke={CHART.gold} strokeDasharray="5 5" />
+                      ]} stroke={CHART.ink} strokeDasharray="5 5" />
                     </ScatterChart>
                   </ResponsiveContainer>
                 </div>
@@ -274,10 +288,10 @@ export default function GarchVolatility() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={clustering.data.squared_return_acf}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="lag" stroke={CHART.axis} tick={{ fontSize: 11 }} label={{ value: "Lag", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 11 }} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} domain={[0, "auto"]} />
-                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "rgba(148,163,184,0.06)" }} />
-                      <Bar dataKey="autocorrelation" fill={CHART.violet} radius={[3, 3, 0, 0]} name="Autocorrelation" />
+                      <XAxis dataKey="lag" stroke={CHART.axis} tick={{ fontSize: 11 }} label={{ value: "Lag", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 11 }}  minTickGap={24} tickMargin={8} height={52} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} domain={[0, "auto"]}  tickMargin={6} />
+                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "var(--surface-sunk)" }} />
+                      <Bar dataKey="autocorrelation" fill={SERIES[2]} radius={[3, 3, 0, 0]} name="Autocorrelation" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

@@ -7,10 +7,17 @@
 
 const API_BASE = "http://localhost:8000/api";
 
-async function fetchJSON(endpoint) {
-  const res = await fetch(`${API_BASE}${endpoint}`);
+async function fetchJSON(endpoint, signal) {
+  const res = await fetch(`${API_BASE}${endpoint}`, { signal });
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${res.statusText}`);
+    // The backend explains itself in the body (e.g. an unknown ticker answers
+    // 404 with a readable message). Showing "API error 404: Not Found" instead
+    // throws that away and leaves the user with nothing to act on.
+    const msg = await res
+      .json()
+      .then((b) => [b.error, b.detail].filter(Boolean).join(" "))
+      .catch(() => "");
+    throw new Error(msg || `API error ${res.status}: ${res.statusText}`);
   }
   return res.json();
 }
@@ -59,9 +66,24 @@ export const getPairsCorrelation = (pairs = null) => {
   return fetchJSON(`/pairs/correlation${q}`);
 };
 
-// Recommendation / Anomaly–Opportunity engine
+// Decision engine — fused verdict over all three pillars.
+// These sit above the per-pillar endpoints above; they don't replace them.
 export const getLlmInfo = () => fetchJSON("/llm/info");
-export const getRecommendations = (ticker = "^GSPC", useLlm = false, pairs = null) => {
-  const p = pairs ? `&pairs=${encodeURIComponent(pairs.join(","))}` : "";
-  return fetchJSON(`/recommendations?ticker=${encodeURIComponent(ticker)}&use_llm=${useLlm}${p}`);
-};
+
+const pairsQ = (pairs, lead = "?") =>
+  pairs && pairs.length ? `${lead}pairs=${encodeURIComponent(pairs.join(","))}` : "";
+
+export const getEngineFeed = (pairs = null, limit = 12, signal) =>
+  fetchJSON(`/engine/feed?limit=${limit}${pairsQ(pairs, "&")}`, signal);
+
+export const getEngineAsset = (ticker = "^GSPC", pairs = null, signal) =>
+  fetchJSON(
+    `/engine/asset?ticker=${encodeURIComponent(ticker)}${pairsQ(pairs, "&")}`,
+    signal
+  );
+
+export const getEngineStatus = (signal) => fetchJSON("/engine/status", signal);
+
+/** URL only — the narration is server-sent events, consumed by EventSource. */
+export const narrateURL = (ticker = "^GSPC", pairs = null) =>
+  `${API_BASE}/engine/narrate?ticker=${encodeURIComponent(ticker)}${pairsQ(pairs, "&")}`;

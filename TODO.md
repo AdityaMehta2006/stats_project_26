@@ -207,6 +207,147 @@ Adds an options layer that ties directly into the volatility pillar and feeds th
   tab transitions; sliding shared-layout indicators on nav + range pills; animated
   confidence/severity bars.
 
-### Still open from §1/§2 (next)
-- Detectors: macro dislocation (needs standardized betas, §3), relative cross-section, breakout.
-- To start the GPU server: run llama-server.exe with `-ngl 99 --port 8080` (see `llm_client.py` header).
+- **Unified decision engine shipped** (`backend/engine.py`): the three pillars are
+  now scored signal sources behind one verdict, while every per-module endpoint
+  stays untouched for drill-down.
+  - **Signal contract** — stable `id`, `source`, `asof`, plus `polarity` (the 7
+    detector vocabularies collapsed onto one bull/bear axis) and `reliability`
+    (derived from each detector's own statistics: cointegration p-value, macro R²,
+    GARCH sample size).
+  - **Fusion** replaces the old `0.2 + 0.15·n + 0.3·top` confidence, which was
+    count-dominated and clamped to 1.0 at ≥6 signals. Now weight = severity ×
+    reliability, with `tilt`, `agreement`, a saturating evidence `mass`, a
+    separate `risk` axis, and an explicit `dissent` list.
+  - **Tiered scan** — price detectors run broad and cheap; the macro factor set is
+    built once per sweep and shared; GARCH is cached on `(ticker, last_data_date)`
+    so it refits once a day; one cointegration sweep serves the whole FX basket.
+  - **Streaming narration** — `llm_client.chat_stream()` (OpenAI SSE + in-process),
+    stance-first prompt so the model's labelled opinion lands before the prose,
+    and a number guardrail checking the narrative against supplied evidence.
+  - Endpoints: `/api/engine/{feed,asset,narrate,status}`. Measured warm: feed 11 ms,
+    per-asset 4.5 ms, off-universe cold 0.9 s (was 3.0 s via `/api/recommendations`).
+- **Data freshness fixed** (§6): `END` was hardcoded to `2025-12-31` and caches never
+  expired — the dashboard was reasoning over 7-month-old data. Now a rolling end date
+  plus an mtime staleness check, with a failed refresh falling back to the stale copy.
+- **Cross-seeding root cause found** (§6): `yfinance` is **not thread-safe** — concurrent
+  `yf.download()` calls silently return one ticker's data for another. A threaded scan
+  reproduced it instantly (META/TSLA, JPM/GLD, ^IXIC/^DJI came back byte-identical).
+  Downloads are now serialized behind a lock; cached reads stay parallel.
+- **`run_granger_causality` was silently dead**: it passed a `verbose` kwarg removed in
+  statsmodels 0.14, and a bare `except` swallowed the `TypeError`, so it always returned
+  zero results. Fixed — now returns 32 results (6 significant) on `^GSPC`.
+- First tests in the repo: `backend/test_engine.py`, 25 cases over the polarity map,
+  fusion invariants, ranking, reliability, stance parsing, and the guardrail.
+
+- **UI now consumes the engine.** The Opportunities tab runs on `/api/engine/*` and
+  shows what the engine actually computes instead of a single opaque confidence bar.
+  - **Two-tier readout** — every metric gives a plain-English word in the primary
+    slot, the exact figure beside it, and the mechanism in the existing `InfoTip`.
+    One element serves a beginner and a trader; nothing needed to read the screen
+    is hidden behind a click. Plain-English layer lives in `frontend/src/verdict.js`.
+  - **Verdict strip** — stance + conviction / direction / risk, replacing the
+    retired `0.2 + 0.15·n + 0.3·top` confidence line.
+  - **Dissent is visible** — signals opposing the verdict render under "Pushing the
+    other way" rather than being averaged into the ranked list.
+  - **Drill-down** — a signal's source badge jumps to the pillar tab that produced it.
+  - **Explainable narration** — `useNarration.js` over native `EventSource`. The
+    model's own stance renders *beside* the computed one (it is allowed to disagree,
+    and now that shows), text streams instead of blocking ~20 s, and the
+    `unverified_numbers` guardrail surfaces as a grounding badge — "stats detect,
+    LLM explains" made visible rather than asserted.
+  - **Shared ticker/pairs via Context** (`ticker.js` + `TickerContext.jsx`) — panels
+    each held a private `useState("^GSPC")`, so switching tabs reset the asset.
+  - **`AbortController` + stale-response guard** in `useApiData` — one fix covering
+    all five panels.
+  - **Status strip** reads `/api/engine/status`: live / warming / offline. The dot was
+    hardcoded green, including when the backend was down.
+  - **No new dependencies.** `framer-motion` and `recharts` were already installed and
+    `EventSource` is native, so Tailwind v4 / shadcn / bklit / kokonut / anime.js were
+    all skipped and the audited `index.css` design system stayed intact.
+- **Macro R² resolved** — the ~0.99 readings were an artefact of the corrupted cache.
+  Clean data gives `^GSPC` R² ≈ 0.69, META ≈ 0.31. `reliability` is reading sane values.
+
+- **Visual redesign — "measured, not decorated".** The navy/teal identity was
+  replaced outright, driven by one rule: *colour means direction; nothing else
+  gets to use it.* Bull/bear are the only hues; severity is bar length, source is
+  a label, risk is a segmented meter.
+  - **Dual theme** — light default (survives a projector), dark follows the OS,
+    three-state toggle in the header. All 30 token pairings verified ≥4.5:1 in
+    both schemes.
+  - **Type** — Archivo (variable, width axis carries the display voice) +
+    JetBrains Mono. Five sizes replacing 32 ad-hoc values; two radii.
+  - **Tilt gauge** (`common/TiltGauge.jsx`) — one instrument replacing four
+    readouts. Marker = balance of evidence, band width = inverse conviction, so
+    it reads as a confidence interval.
+  - **Signals are a hairline list**, not a card grid — agreeing and dissenting
+    rows now share one width and one left axis (they didn't before).
+  - **Bento grids** for the Overview and the chart areas, with spans that tile
+    exactly at every breakpoint.
+  - **Skeletons everywhere** — layout-matched shapes on first load, dim-in-place
+    on refetch. The centred spinner is gone.
+  - **Tab switching no longer janks**: `useApiData` gained a session cache
+    (stale-while-revalidate), and `AnimatePresence mode="wait"` was removed — it
+    was forcing a ~240ms empty gap before the incoming panel could mount.
+  - **Chart axes** got `minTickGap`/`tickMargin`/explicit label height, and the
+    charts grid went from 3-up auto-fit to 2-up bento, which is what the dense
+    date and quantile axes actually needed.
+  - Zero new dependencies. kokonut/bklit informed the hairline and bento
+    discipline; framer-motion and recharts already covered motion and charts.
+  - impeccable detector: 8 findings → **0**.
+- **Wrap-up bug sweep.**
+  - `python main.py` was broken — `uvicorn.run()` got the app object while
+    `reload=True` demands an import string, so it exited immediately. Two places
+    in the UI told users to run exactly that command; both now match reality.
+  - An unknown ticker returned **500** quoting an internal cache key
+    (`Download returned empty data for 'equity_ZZZNOTREAL'`). `data_loader` now
+    raises `NoDataError` and the API answers **404** with a readable message —
+    one handler covers every endpoint, since all data access routes through
+    `_load_or_download`. `api.js` reads the server's message instead of
+    discarding it for "API error 404: Not Found".
+  - "Top Return Drivers" coloured positive betas with a *neutral ink* step while
+    negatives got bear red, so the sign was only half-encoded. Both sides now use
+    the direction pair.
+  - The QQ scatter and its reference diagonal were adjacent ramp steps — the line
+    the points are meant to deviate from was hard to pick out.
+  - `npm run lint` had been failing before this work; now clean. The one error
+    was the rule reporting its own inability to verify a generic hook's deps,
+    documented in place rather than restructured around.
+  - Dead CSS (`.chart-full`, `.chart-third`, `.bento-cell.full`) removed.
+- **`.gitignore` hardened.** Two classes of tooling state were ignored only by
+  *machine-local* files that never get committed — so they worked for one
+  developer and would have shown up as untracked for anyone else cloning:
+  - `.claude/` — covered only by a global gitignore
+  - `.impeccable/` and `frontend/.impeccable/` (design-hook caches) — covered
+    only by `.git/info/exclude`
+  Both now live in the repo's own `.gitignore`, alongside `.remember/` and the
+  other AI/editor tool dirs. Also added `.playwright-mcp/`, root-anchored
+  screenshot patterns (so `src/assets/hero.png` survives), model weights, and
+  `backend/data/raw/*` with a `.gitkeep` exception so the folder still exists.
+  Verified: **62 files would be committed, all project code/docs**, and nothing
+  already tracked became ignored.
+
+### Still open (next)
+- **Statistical rigor — the biggest remaining gap.** The detectors are built but their
+  inferential claims are unvalidated:
+  - `pairs.py` runs C(n,2) cointegration tests (990 for 45 pairs), counts `p<0.05` as
+    cointegrated, and reports the *minimum* p-value across all of them as if it were a
+    single test. ~50 false positives are expected by chance. Needs BH-FDR
+    (`statsmodels.stats.multitest.multipletests`) — one import, and it feeds
+    `engine._reliability`, which currently trusts that selection-biased p-value.
+  - `macro_regression.py` needs HAC/Newey-West errors (`.fit(cov_type="HAC",
+    cov_kwds={"maxlags": 4})`) — monthly residuals are autocorrelated and lags 0–3 of
+    the same factor are collinear, so the p-values are overstated.
+  - `data_loader.build_macro_dataset` feeds `Treasury10Y`, `FedFunds` and
+    `Unemployment` in as **levels** against a stationary return target — `.diff()` them.
+  - GARCH is described (AIC/BIC/persistence) but never forecast. A rolling 1-step-ahead
+    99% VaR + Kupiec test would validate it.
+  - `pairs.get_best_pair_analysis` fits the hedge ratio and rolling z on the full
+    sample, then generates signals over that same sample — look-ahead bias.
+  When these land, q-values and VaR-breach rates display through the existing
+  `LabelWithTip` next to the current p-value readouts.
+- Wire `black_scholes.analyze_option` into the engine as a vol-mispricing detector
+  (its `vol_verdict` is computed but nothing consumes it).
+- `/api/recommendations` is now unused by the UI — safe to delete from `main.py`.
+- To start the GPU server: run llama-server.exe with `-ngl 99 --port 8080` (see
+  `llm_client.py` header). Currently falling back to the in-process CPU path
+  (~5.7 s per narration vs an expected ~2 s on GPU).

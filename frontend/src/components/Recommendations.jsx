@@ -1,235 +1,306 @@
-import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import useApiData from "../hooks/useApiData";
-import { getRecommendations } from "../api";
-import { LoadingState, ErrorState } from "./common/StatusStates";
+import useNarration from "../hooks/useNarration";
+import { getEngineAsset } from "../api";
+import { useTicker } from "../ticker";
+import { ErrorState, VerdictSkeleton, SignalSkeleton } from "./common/StatusStates";
 import TickerSearch from "./common/TickerSearch";
+import TiltGauge, { RiskMeter } from "./common/TiltGauge";
 import Icon from "./common/Icon";
 import { InfoTip } from "./common/Tooltip";
-import { CHART } from "../theme";
+import {
+  stanceGloss, stanceTone, riskWord,
+  DETECTOR_TIPS, SOURCE_TAB, SOURCE_LABEL, prettyType,
+} from "../verdict";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.07 } },
+const TIPS = {
+  gauge:
+    "Where the evidence lands on a bear-to-bull axis, and how firmly. The marker is the balance of signals, weighted by how extreme each one is and how far its own statistics justify trusting it. The band is the uncertainty: wide means thin evidence, tight means the detectors agree.",
+  risk:
+    "How turbulent conditions are, from the volatility and tail-move detectors. Deliberately separate from direction — a volatility spike says the ride is rough, not which way it goes.",
+  dissent:
+    "These detectors point against the verdict. They are not discarded — disagreement is what widens the band above, so the read stays honest about how mixed the evidence is.",
 };
-const item = {
-  hidden: { opacity: 0, y: 14 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.38 } },
-};
 
-function sevClass(s) { return s >= 0.66 ? "sev-high" : s >= 0.4 ? "sev-mid" : "sev-low"; }
-function sevColor(s) { return s >= 0.66 ? CHART.down : s >= 0.4 ? CHART.gold : CHART.cyan; }
-
-export default function Recommendations() {
-  const [ticker, setTicker] = useState("^GSPC");
-  const [narrative, setNarrative] = useState(null);
-  const [narrLoading, setNarrLoading] = useState(false);
-  const [narrError, setNarrError] = useState(null);
-
-  const rec = useApiData(() => getRecommendations(ticker, false), [ticker]);
-
-  const runAI = useCallback(async () => {
-    setNarrLoading(true);
-    setNarrError(null);
-    setNarrative(null);
-    try {
-      const data = await getRecommendations(ticker, true);
-      setNarrative(data.llm_narrative || "The model returned no note.");
-    } catch (e) {
-      setNarrError(e.message || "AI note failed");
-    } finally {
-      setNarrLoading(false);
-    }
-  }, [ticker]);
-
-  const onSelect = (t) => {
-    setTicker(t);
-    setNarrative(null);
-    setNarrError(null);
-  };
-
-  const data = rec.data;
-  const llmAvailable = data?.llm?.available;
+/**
+ * One signal as a row, not a card. A single column means one left alignment
+ * axis and one width for every signal, which is what stops the dissenting
+ * signals rendering at a different size from the agreeing ones.
+ */
+function SignalRow({ s, onDrill }) {
+  const tab = SOURCE_TAB[s.source];
+  const weight = s.severity * s.reliability;
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show">
-      <motion.div className="section-header" variants={item}>
-        <div className="section-ico macro">
-          <Icon name="target" size={22} strokeWidth={1.7} />
-        </div>
-        <div>
-          <h2>Opportunities &amp; Anomalies</h2>
-          <p>Automated scan that ranks what's unusual or actionable right now</p>
-        </div>
-      </motion.div>
-
-      <motion.div className="section-intro" variants={item}>
-        <span className="intro-ico"><Icon name="info" size={17} /></span>
-        <span>
-          Deterministic detectors run across all three pillars —{" "}
-          <strong>volatility regime</strong>, <strong>tail moves</strong>,{" "}
-          <strong>trend</strong>, and <strong>forex mean-reversion</strong> —
-          and rank each finding by severity. The numbers come purely from the
-          stats; the optional <strong>AI note</strong> (a local model) only
-          explains them in plain English and never invents figures.
+    <motion.article
+      className="signal-row"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <header className="signal-row-head">
+        <span className="signal-type">
+          {prettyType(s.type)}
+          <InfoTip text={DETECTOR_TIPS[s.type] || "A detector reading."} />
         </span>
-      </motion.div>
 
-      <motion.div variants={item} className="toolbar-card">
-        <TickerSearch value={ticker} onSelect={onSelect} label="Scan Ticker" />
-      </motion.div>
+        {/* Weight as bar length — the only encoding of it on the row. Sits in
+            the header so it reads as a measurement, not as a divider rule. */}
+        <span
+          className="signal-weight"
+          title={`severity ${s.severity.toFixed(2)} × reliability ${s.reliability.toFixed(2)}`}
+        >
+          <span className="signal-weight-fill" style={{ width: `${Math.max(5, weight * 100)}%` }} />
+        </span>
 
-      {rec.loading && (
-        <LoadingState
-          message={`Scanning ${ticker}…`}
-          subtext="Running anomaly & opportunity detectors"
-        />
+        <span className="signal-spacer" />
+        {tab ? (
+          <button
+            className="source-link"
+            onClick={() => onDrill(tab, s.asset, s.source)}
+            title={`Open ${SOURCE_LABEL[s.source]} for ${s.asset}`}
+          >
+            {s.asset} <Icon name="arrowRight" size={11} />
+          </button>
+        ) : (
+          <span className="source-label">{s.asset}</span>
+        )}
+      </header>
+
+      <h3 className="signal-label">{s.label}</h3>
+      <p className="signal-note">{s.note}</p>
+
+      <footer className="signal-foot">
+        <span className="signal-rec">{s.recommendation}</span>
+        {s.evidence && Object.keys(s.evidence).length > 0 && (
+          <span className="evidence-chips">
+            {Object.entries(s.evidence).map(([k, v]) => (
+              <span key={k} className="evidence-chip">
+                {k.replace(/_/g, " ")} <b>{String(v)}</b>
+              </span>
+            ))}
+          </span>
+        )}
+      </footer>
+    </motion.article>
+  );
+}
+
+function AnalystPanel({ verdict, narr, llmDown }) {
+  const disagrees = narr.stance && narr.stance !== verdict.stance && !narr.streaming;
+
+  return (
+    <section className="analyst">
+      <header className="analyst-head">
+        <h2 className="block-title">
+          AI analyst
+          <InfoTip text="A local language model reads the detections below and explains them. It never computes the numbers — the statistics do that — and every figure it writes is checked back against them." />
+        </h2>
+        <button className="btn" onClick={narr.start} disabled={narr.streaming || llmDown}>
+          {narr.streaming ? "Writing…" : narr.text ? "Regenerate" : "Explain this"}
+        </button>
+      </header>
+
+      {(narr.stance || narr.streaming) && (
+        <div className="stance-pair">
+          <div className="stance-col">
+            <span className="micro-label">
+              Statistics say
+              <InfoTip text="The verdict computed from the detectors — arithmetic only, no model involved." />
+            </span>
+            <span className={`stance-value ${stanceTone(verdict.stance)}`}>{verdict.stance}</span>
+          </div>
+          <div className="stance-col">
+            <span className="micro-label">
+              The model reads it as
+              <InfoTip text="The model's own label, written before its explanation. It sees the same numbers and may weigh them differently." />
+            </span>
+            <span className={`stance-value ${narr.stance ? stanceTone(narr.stance) : ""}`}>
+              {narr.stance || "…"}
+            </span>
+          </div>
+        </div>
       )}
-      {rec.error && !rec.loading && (
-        <ErrorState message={rec.error} onRetry={rec.reload} />
+
+      {disagrees && (
+        <p className="note-line">
+          The model reads this differently from the computed verdict. Its reasoning is
+          below; the numbers above are unchanged.
+        </p>
       )}
 
-      {!rec.loading && !rec.error && data && (
-        <>
-          {/* Overall verdict */}
-          <motion.div className="card" variants={item}>
-            <div className="card-header">
-              <div>
-                <div className="card-title">
-                  {data.overall.headline}
-                  <InfoTip text="The highest-severity signal found. Confidence scales with how many detectors fired and how strong the top signal is." />
-                </div>
-                <div className="card-subtitle">{data.rules_summary}</div>
-              </div>
-              <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div className="stat-value highlight" style={{ fontSize: "1.35rem" }}>
-                  {Math.round(data.overall.confidence * 100)}%
-                </div>
-                <div className="stat-label" style={{ justifyContent: "flex-end" }}>
-                  Confidence
-                </div>
-              </div>
-            </div>
-            <div className="conf-meter">
-              <motion.div
-                className="conf-fill"
-                initial={{ width: 0 }}
-                animate={{ width: `${data.overall.confidence * 100}%` }}
-                transition={{ duration: 0.9, ease: "easeOut" }}
-              />
-            </div>
-          </motion.div>
+      {llmDown && (
+        <p className="analyst-text muted">
+          Local model unavailable. Every signal on this page is unaffected — the
+          statistics run without it.
+        </p>
+      )}
+      {narr.error && <p className="analyst-text bear-text">{narr.error}</p>}
+      {narr.skipped && <p className="analyst-text muted">Nothing to explain — {narr.skipped}.</p>}
 
-          {/* AI note */}
-          <motion.div className="ai-panel" variants={item}>
-            <div className="ai-panel-head">
-              <div className="card-title">
-                <Icon name="sparkles" size={17} style={{ color: "var(--accent-primary)" }} />
-                AI Analyst Note
-                <InfoTip
-                  text={`Generated locally by ${
-                    data.llm?.model || "the configured model"
-                  }. Grounded strictly in the detected numbers above.`}
-                />
-              </div>
-              <button
-                className="ai-btn"
-                onClick={runAI}
-                disabled={narrLoading || !llmAvailable}
-              >
-                {narrLoading ? (
-                  <>
-                    <span
-                      className="loading-spinner"
-                      style={{ width: 13, height: 13, borderWidth: 2 }}
-                    />{" "}
-                    Generating…
-                  </>
-                ) : (
-                  <>
-                    <Icon name="sparkles" size={13} />{" "}
-                    {narrative ? "Regenerate" : "Generate note"}
-                  </>
-                )}
-              </button>
-            </div>
+      {narr.text && (
+        <p className="analyst-text">
+          {narr.text}
+          {narr.streaming && <span className="stream-caret" />}
+        </p>
+      )}
 
-            {!llmAvailable && (
-              <div className="ai-narrative" style={{ color: "var(--text-muted)" }}>
-                Local model unavailable — set up the LLM runtime to enable AI
-                notes (rules-based signals still work).
-              </div>
-            )}
-            {narrError && (
-              <div className="ai-narrative" style={{ color: "var(--accent-danger)" }}>
-                {narrError}
-              </div>
-            )}
-            {narrLoading && (
-              <div className="ai-narrative" style={{ color: "var(--text-muted)" }}>
-                Running the local model (CPU) — this takes ~15–30s…
-              </div>
-            )}
-            {narrative && !narrLoading && (
-              <div className="ai-narrative">{narrative}</div>
-            )}
-            {!narrative && !narrLoading && !narrError && llmAvailable && (
-              <div className="ai-narrative" style={{ color: "var(--text-muted)" }}>
-                Click "Generate note" for a plain-English read of the signals below.
-              </div>
-            )}
-          </motion.div>
+      {!narr.text && !narr.streaming && !llmDown && !narr.error && !narr.skipped && (
+        <p className="analyst-text muted">
+          Read the signals in plain English, grounded in the evidence below.
+        </p>
+      )}
 
-          {/* Signal cards */}
-          {data.signals.length === 0 ? (
-            <motion.div
-              className="card"
-              variants={item}
-              style={{ marginTop: "1rem", textAlign: "center", color: "var(--text-muted)", padding: "2.5rem" }}
-            >
-              No notable anomalies detected for {ticker} right now.
-            </motion.div>
+      {narr.unverified && (
+        <p className={`grounding ${narr.unverified.length ? "flagged" : "clean"}`}>
+          <Icon name={narr.unverified.length ? "alert" : "check"} size={13} />
+          {narr.unverified.length ? (
+            <span>
+              {narr.unverified.length} figure{narr.unverified.length > 1 ? "s" : ""} not
+              found in the evidence: <b className="mono-dim">{narr.unverified.join(", ")}</b>
+            </span>
           ) : (
-            <div className="signals-grid">
-              {data.signals.map((s, i) => (
-                <motion.div
-                  key={i}
-                  className={`signal-card ${sevClass(s.severity)}`}
-                  variants={item}
-                >
-                  <div className="signal-top">
-                    <span className="signal-type">{s.type.replace(/_/g, " ")}</span>
-                    <span className="badge info">{s.asset}</span>
-                  </div>
-                  <div className="severity-meter">
-                    <motion.div
-                      className="severity-fill"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${s.severity * 100}%` }}
-                      transition={{ duration: 0.7, ease: "easeOut", delay: 0.08 + i * 0.04 }}
-                      style={{ background: sevColor(s.severity) }}
-                    />
-                  </div>
-                  <div className="signal-label">{s.label}</div>
-                  <div className="signal-note">{s.note}</div>
-                  <div className="signal-rec">
-                    <Icon name="arrowRight" size={13} /> {s.recommendation}
-                  </div>
-                  {s.evidence && (
-                    <div className="evidence-chips">
-                      {Object.entries(s.evidence).map(([k, v]) => (
-                        <span key={k} className="evidence-chip">
-                          {k.replace(/_/g, " ")}: <b>{String(v)}</b>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </motion.div>
-              ))}
-            </div>
+            <span>Every figure traced back to the evidence below.</span>
           )}
+          <InfoTip text="Each number in the note is matched against the detected evidence. It is advisory — ordinary counts like '3 signals' get flagged too — and exists to catch a model inventing a price or a statistic." />
+        </p>
+      )}
+    </section>
+  );
+}
+
+export default function Recommendations({ onNavigate, llmAvailable, status }) {
+  const { ticker, setTicker, pairs } = useTicker();
+  const scan = useApiData((signal) => getEngineAsset(ticker, pairs, signal), [ticker, pairs], "engine-asset");
+  const narr = useNarration(ticker, pairs);
+
+  const data = scan.data;
+  // Skeleton only when there is nothing on screen; otherwise dim in place.
+  const firstLoad = scan.loading && !data;
+  const refetching = scan.loading && !!data;
+
+  const verdict = data?.verdict;
+  const signals = data?.signals || [];
+  const dissentIds = new Set(verdict?.dissent || []);
+  const agreeing = signals.filter((s) => !dissentIds.has(s.id));
+  const dissenting = signals.filter((s) => dissentIds.has(s.id));
+  const llmDown = !llmAvailable || Boolean(narr.skipped?.includes("unavailable"));
+
+  // The engine pre-warms a fixed universe; anything else pays for a cold GARCH
+  // fit on first request. Say so rather than showing an unexplained wait.
+  const cold = status?.universe && !status.universe.includes(ticker);
+
+  const drill = (tab, asset, source) => {
+    if (source !== "pairs") setTicker(asset);
+    onNavigate?.(tab);
+  };
+
+  return (
+    <div className="panel">
+      <header className="panel-head">
+        <h1>Opportunities</h1>
+        <p>
+          Seven detectors across volatility, macro, forex mean-reversion and price.
+          Each is weighted by how extreme it is and how far its own statistics justify
+          trusting it, then netted into one read.
+        </p>
+      </header>
+
+      <div className="panel-toolbar">
+        <TickerSearch value={ticker} onSelect={setTicker} label="Scan" />
+      </div>
+
+      {scan.error && !scan.loading && <ErrorState message={scan.error} onRetry={scan.reload} />}
+
+      {firstLoad && (
+        <>
+          {cold && (
+            <p className="note-line">
+              First scan for {ticker} — fitting the volatility model over ~2,700
+              observations. Assets in the pre-warmed universe return instantly.
+            </p>
+          )}
+          <VerdictSkeleton />
+          <SignalSkeleton rows={3} />
         </>
       )}
-    </motion.div>
+
+      {!firstLoad && !scan.error && data && (
+        <div className={refetching ? "is-refetching" : undefined}>
+          <section className="verdict-block">
+            <div className="verdict-head">
+              <div>
+                <h2 className={`verdict-stance ${stanceTone(verdict.stance)}`}>
+                  {verdict.stance}
+                </h2>
+                <p className="verdict-gloss">{stanceGloss(verdict.stance)}</p>
+              </div>
+              <p className="verdict-asof">
+                {signals.length} signal{signals.length === 1 ? "" : "s"}
+                <br />
+                <span className="mono-dim">data to {data.asof}</span>
+              </p>
+            </div>
+
+            <div className="verdict-instruments">
+              <div className="instrument">
+                <span className="micro-label">
+                  Where the evidence points
+                  <InfoTip text={TIPS.gauge} />
+                </span>
+                <TiltGauge
+                  tilt={verdict.tilt}
+                  conviction={verdict.conviction}
+                  stance={verdict.stance}
+                />
+              </div>
+
+              <div className="instrument instrument-risk">
+                <span className="micro-label">
+                  Risk
+                  <InfoTip text={TIPS.risk} />
+                </span>
+                <RiskMeter risk={verdict.risk} />
+                <span className="instrument-word">{riskWord(verdict.risk)}</span>
+              </div>
+            </div>
+          </section>
+
+          <AnalystPanel verdict={verdict} narr={narr} llmDown={llmDown} />
+
+          {signals.length === 0 ? (
+            <p className="empty-note">
+              No notable anomalies for {ticker} right now.
+              {Object.keys(data.diagnostics || {}).length > 0 && (
+                <span className="diag-note">
+                  {" "}
+                  {Object.keys(data.diagnostics).length} detector
+                  {Object.keys(data.diagnostics).length > 1 ? "s" : ""} could not run, so
+                  this is not the same as "nothing found".
+                </span>
+              )}
+            </p>
+          ) : (
+            <div className="signal-list">
+              {agreeing.map((s) => (
+                <SignalRow key={s.id} s={s} onDrill={drill} />
+              ))}
+
+              {dissenting.length > 0 && (
+                <>
+                  <h2 className="list-divider">
+                    Pushing the other way
+                    <InfoTip text={TIPS.dissent} />
+                  </h2>
+                  {dissenting.map((s) => (
+                    <SignalRow key={s.id} s={s} onDrill={drill} />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

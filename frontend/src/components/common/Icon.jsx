@@ -24,6 +24,20 @@ const PATHS = {
   ),
   // Pillar: GARCH / volatility — waveform
   activity: <path d="M3 12h3l3 8 4-16 3 8h5" />,
+  // Theme control: light / dark / follow the OS
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </>
+  ),
+  moon: <path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z" />,
+  auto: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 3.5v17a8.5 8.5 0 000-17z" fill="currentColor" stroke="none" />
+    </>
+  ),
   // Pillar: pair trading — exchange / mean reversion
   exchange: (
     <>

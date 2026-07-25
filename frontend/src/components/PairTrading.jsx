@@ -10,17 +10,18 @@ import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Legend, ComposedChart
+  ResponsiveContainer, ReferenceLine, ReferenceArea, Scatter, Legend, ComposedChart
 } from "recharts";
 import useApiData from "../hooks/useApiData";
+import { useTicker } from "../ticker";
 import { getPairsCointegration, getPairsBest, getPairsCorrelation } from "../api";
-import { LoadingState, ErrorState } from "./common/StatusStates";
+import { ErrorState, StatsSkeleton, ChartSkeleton } from "./common/StatusStates";
 import ForexPairSelector from "./common/ForexPairSelector";
 import Icon from "./common/Icon";
 import { InfoTip, LabelWithTip } from "./common/Tooltip";
 import TimeRangeFilter from "./common/TimeRangeFilter";
 import { filterByRange, axisInterval } from "../timeRange";
-import { CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
+import { CHART, SERIES, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 
 const container = {
   hidden: { opacity: 0 },
@@ -32,22 +33,54 @@ const item = {
 };
 
 export default function PairTrading() {
-  const [selectedPairs, setSelectedPairs] = useState(["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "EURGBP"]);
+  // Shared with the engine: the basket picked here is what the pairs detector scans.
+  const { pairs: selectedPairs, setPairs: setSelectedPairs } = useTicker();
 
-  const coint = useApiData(() => getPairsCointegration(selectedPairs), [selectedPairs.join(",")]);
-  const best = useApiData(() => getPairsBest(selectedPairs), [selectedPairs.join(",")]);
-  const corr = useApiData(() => getPairsCorrelation(selectedPairs), [selectedPairs.join(",")]);
+  const coint = useApiData(() => getPairsCointegration(selectedPairs), [selectedPairs.join(",")], "pairs-coint");
+  const best = useApiData(() => getPairsBest(selectedPairs), [selectedPairs.join(",")], "pairs-best");
+  const corr = useApiData(() => getPairsCorrelation(selectedPairs), [selectedPairs.join(",")], "pairs-corr");
 
   const loading = coint.loading || best.loading || corr.loading;
   const error = coint.error || best.error || corr.error;
 
+  const hasData = Boolean(coint.data || best.data || corr.data);
+  const firstLoad = loading && !hasData;
+  const refetching = loading && hasData;
+
   const [range, setRange] = useState("1Y");
   const spreadData = useMemo(() => filterByRange(best.data?.spread_series || [], range), [best.data, range]);
   const priceData = useMemo(() => filterByRange(best.data?.price_series || [], range), [best.data, range]);
-  const zData = useMemo(() => spreadData.filter((d) => d.z_score !== undefined), [spreadData]);
+  /**
+   * Fold the generated entries/exits onto the z-score series so the chart shows
+   * where the rule actually fired, not just where the bands are. Buys and sells
+   * ride separate keys so each can carry its own direction colour.
+   */
+  const zData = useMemo(() => {
+    const rows = spreadData.filter((d) => d.z_score !== undefined);
+    const byDate = new Map((best.data?.signals || []).map((s) => [s.date, s.signal]));
+    return rows.map((d) => {
+      const sig = byDate.get(d.date);
+      return {
+        ...d,
+        entry_buy: sig === "buy" ? d.z_score : undefined,
+        entry_sell: sig === "sell" ? d.z_score : undefined,
+        exit: sig === "close_long" || sig === "close_short" ? d.z_score : undefined,
+      };
+    });
+  }, [spreadData, best.data]);
+
+  /** Mean and ±1σ/±2σ for the spread — what "mean reversion" is reverting to. */
+  const spreadStats = useMemo(() => {
+    const vals = spreadData.map((d) => d.spread).filter((v) => typeof v === "number");
+    if (!vals.length) return null;
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+    return { mean, sd };
+  }, [spreadData]);
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show">
+    <motion.div variants={container} initial="hidden" animate="show"
+      className={refetching ? "is-refetching" : undefined}>
       <motion.div className="section-header" variants={item}>
         <div className="section-ico pairs"><Icon name="exchange" size={24} /></div>
         <div>
@@ -75,15 +108,23 @@ export default function PairTrading() {
         </div>
       </motion.div>
 
-      {loading && <LoadingState message="Testing cointegration across pairs…" subtext="Engle-Granger tests and spread construction" />}
-      {error && !loading && <ErrorState message={error} onRetry={() => { coint.reload(); best.reload(); corr.reload(); }} />}
+      {firstLoad && (
+        <>
+          <StatsSkeleton boxes={6} />
+          <div className="charts-grid">
+            <ChartSkeleton />
+            <ChartSkeleton />
+          </div>
+        </>
+      )}
+      {error && !firstLoad && <ErrorState message={error} onRetry={() => { coint.reload(); best.reload(); corr.reload(); }} />}
 
-      {!loading && !error && (
+      {!firstLoad && !error && (
         <>
           {best.data && coint.data && (
             <motion.div className="stats-grid" variants={item}>
               <div className="stat-box">
-                <div className="stat-value highlight">{best.data.pair_a}/{best.data.pair_b}</div>
+                <div className="stat-value text">{best.data.pair_a}/{best.data.pair_b}</div>
                 <div className="stat-label">
                   <LabelWithTip tip="The pair with the strongest long-run link (lowest cointegration p-value) among your selection — the one we trade.">
                     Best Cointegrated Pair
@@ -150,15 +191,32 @@ export default function PairTrading() {
                 </div>
                 <div className="chart-container tall">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={zData}>
+                    <ComposedChart data={zData} margin={{ top: 8, right: 20, bottom: 0, left: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(zData.length)} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(zData.length)} minTickGap={24} tickMargin={8} />
+                      <YAxis
+                        stroke={CHART.axis}
+                        tick={{ fontSize: 11 }}
+                        tickMargin={6}
+                        width={48}
+                        domain={[(min) => Math.min(-3, Math.floor(min)), (max) => Math.max(3, Math.ceil(max))]}
+                        tickFormatter={(v) => `${v > 0 ? "+" : ""}${v}σ`}
+                      />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
-                      <ReferenceLine y={2} stroke={CHART.down} strokeDasharray="5 5" label={{ value: "Sell Zone", fill: CHART.down, fontSize: 10, position: "right" }} />
-                      <ReferenceLine y={-2} stroke={CHART.up} strokeDasharray="5 5" label={{ value: "Buy Zone", fill: CHART.up, fontSize: 10, position: "right" }} />
-                      <ReferenceLine y={0} stroke={CHART.axis} strokeDasharray="3 3" />
-                      <Line type="monotone" dataKey="z_score" stroke={CHART.teal} dot={false} strokeWidth={1.6} name="Z-Score" />
+
+                      {/* Shaded bands beyond ±2 read as "tradeable territory" far
+                          faster than two dashed lines do. */}
+                      <ReferenceArea y1={2} y2={100} fill="var(--bear-wash)" fillOpacity={1} />
+                      <ReferenceArea y1={-100} y2={-2} fill="var(--bull-wash)" fillOpacity={1} />
+                      <ReferenceLine y={2} stroke={CHART.down} strokeDasharray="4 4" label={{ value: "sell +2σ", fill: CHART.down, fontSize: 10, position: "insideTopRight" }} />
+                      <ReferenceLine y={-2} stroke={CHART.up} strokeDasharray="4 4" label={{ value: "buy −2σ", fill: CHART.up, fontSize: 10, position: "insideBottomRight" }} />
+                      <ReferenceLine y={0} stroke={CHART.axis} />
+
+                      <Line type="monotone" dataKey="z_score" stroke={CHART.ink} dot={false} strokeWidth={1.5} name="Z-score" isAnimationActive={false} />
+                      {/* Where the rule actually fired. */}
+                      <Scatter dataKey="entry_buy" name="Buy signal" fill={CHART.up} shape="circle" />
+                      <Scatter dataKey="entry_sell" name="Sell signal" fill={CHART.down} shape="circle" />
+                      <Scatter dataKey="exit" name="Exit" fill={CHART.axis} shape="cross" />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -181,13 +239,13 @@ export default function PairTrading() {
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={priceData}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(priceData.length, 6)} />
-                      <YAxis yAxisId="left" stroke={CHART.teal} tick={{ fontSize: 11 }} />
-                      <YAxis yAxisId="right" orientation="right" stroke={CHART.cyan} tick={{ fontSize: 11 }} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(priceData.length, 6)}  minTickGap={24} tickMargin={8} />
+                      <YAxis yAxisId="left" stroke={SERIES[0]} tick={{ fontSize: 11 }} tickMargin={6} width={60} domain={["auto", "auto"]} />
+                      <YAxis yAxisId="right" orientation="right" stroke={SERIES[5]} tick={{ fontSize: 11 }} tickMargin={6} width={60} domain={["auto", "auto"]} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
-                      <Legend />
-                      <Line yAxisId="left" type="monotone" dataKey={best.data.pair_a} stroke={CHART.teal} dot={false} strokeWidth={1.6} />
-                      <Line yAxisId="right" type="monotone" dataKey={best.data.pair_b} stroke={CHART.cyan} dot={false} strokeWidth={1.6} />
+                      <Legend verticalAlign="top" height={30} iconType="plainline" />
+                      <Line yAxisId="left" type="monotone" dataKey={best.data.pair_a} stroke={SERIES[0]} dot={false} strokeWidth={1.6} isAnimationActive={false} />
+                      <Line yAxisId="right" type="monotone" dataKey={best.data.pair_b} stroke={SERIES[5]} dot={false} strokeWidth={1.6} isAnimationActive={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -208,12 +266,27 @@ export default function PairTrading() {
                 </div>
                 <div className="chart-container">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={spreadData}>
+                    <LineChart data={spreadData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(spreadData.length, 6)} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                      <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(spreadData.length, 6)} minTickGap={24} tickMargin={8} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} tickMargin={6} width={62} domain={["auto", "auto"]} tickFormatter={(v) => v.toFixed(3)} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
-                      <Line type="monotone" dataKey="spread" stroke={CHART.violet} dot={false} strokeWidth={1.6} name="Spread" />
+                      {/* Mean and ±1σ/±2σ: without them "mean reverting" is a
+                          claim about a line with nothing to revert to. */}
+                      {spreadStats && (
+                        <>
+                          <ReferenceArea
+                            y1={spreadStats.mean - spreadStats.sd}
+                            y2={spreadStats.mean + spreadStats.sd}
+                            fill="var(--ink)"
+                            fillOpacity={0.06}
+                          />
+                          <ReferenceLine y={spreadStats.mean} stroke={CHART.axis} label={{ value: "mean", fill: CHART.axis, fontSize: 10, position: "insideTopLeft" }} />
+                          <ReferenceLine y={spreadStats.mean + 2 * spreadStats.sd} stroke={CHART.grid} strokeDasharray="4 4" />
+                          <ReferenceLine y={spreadStats.mean - 2 * spreadStats.sd} stroke={CHART.grid} strokeDasharray="4 4" />
+                        </>
+                      )}
+                      <Line type="monotone" dataKey="spread" stroke={CHART.ink} dot={false} strokeWidth={1.5} name="Spread" isAnimationActive={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -276,7 +349,7 @@ export default function PairTrading() {
                 <ForexCorrelationHeatmap data={corr.data.correlation_matrix} pairs={corr.data.pairs} />
                 <div className="legend-row">
                   <span className="legend-item"><span className="legend-swatch" style={{ background: "rgba(45,212,191,0.7)" }} /> Positive</span>
-                  <span className="legend-item"><span className="legend-swatch" style={{ background: "rgba(148,163,184,0.18)" }} /> Neutral</span>
+                  <span className="legend-item"><span className="legend-swatch" style={{ background: "var(--hairline)" }} /> Neutral</span>
                   <span className="legend-item"><span className="legend-swatch" style={{ background: "rgba(248,113,113,0.7)" }} /> Negative</span>
                 </div>
               </motion.div>
@@ -345,13 +418,13 @@ export default function PairTrading() {
 
 function ForexCorrelationHeatmap({ data, pairs }) {
   function getColor(val) {
-    if (val >= 0.8) return "rgba(45, 212, 191, 0.7)";
-    if (val >= 0.5) return "rgba(45, 212, 191, 0.42)";
-    if (val >= 0.2) return "rgba(45, 212, 191, 0.2)";
+    if (val >= 0.8) return `oklch(from var(--bull) l c h / 0.62)`;
+    if (val >= 0.5) return `oklch(from var(--bull) l c h / 0.36)`;
+    if (val >= 0.2) return `oklch(from var(--bull) l c h / 0.16)`;
     if (val >= -0.2) return "rgba(148, 163, 184, 0.12)";
-    if (val >= -0.5) return "rgba(248, 113, 113, 0.2)";
-    if (val >= -0.8) return "rgba(248, 113, 113, 0.42)";
-    return "rgba(248, 113, 113, 0.7)";
+    if (val >= -0.5) return `oklch(from var(--bear) l c h / 0.2)`;
+    if (val >= -0.8) return `oklch(from var(--bear) l c h / 0.42)`;
+    return `oklch(from var(--bear) l c h / 0.7)`;
   }
 
   return (

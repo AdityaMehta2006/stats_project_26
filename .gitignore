@@ -1,3 +1,11 @@
+# ---------------------------------------------------------------------------
+# QuantAnomalies — ignored paths
+#
+# Rule of thumb: if it can be regenerated (caches, builds, downloaded market
+# data) or is personal to one machine (editor settings, secrets), it stays out.
+# Sources, docs and the final PDFs are tracked.
+# ---------------------------------------------------------------------------
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,23 +21,26 @@ ENV/
 .ruff_cache/
 .coverage
 htmlcov/
-backend/__pycache__/
 
 # Node / Vite
 node_modules/
-frontend/node_modules/
 dist/
-frontend/dist/
 dist-ssr/
-frontend/dist-ssr/
 .vite/
-frontend/.vite/
 *.local
+coverage/
 
-# Downloaded market-data caches (regenerated from Yahoo/FRED on first run)
-backend/data/raw/*.csv
+# Downloaded market-data caches — regenerated from Yahoo/FRED on first run.
+# The folder itself is kept via .gitkeep so the app has somewhere to write.
+backend/data/raw/*
+!backend/data/raw/.gitkeep
 
-# LaTeX build artifacts (keep the .tex sources and final .pdf)
+# Local model weights — far too large for git, fetched separately.
+*.gguf
+*.safetensors
+*.bin
+
+# LaTeX build artifacts (the .tex sources and final .pdf are tracked)
 *.aux
 *.toc
 *.out
@@ -46,13 +57,40 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Secrets / environment (e.g. ANTHROPIC_API_KEY for the decision engine)
+# Secrets / environment (e.g. LLM_API_KEY for the decision engine)
 .env
 .env.*
 !.env.example
 
+# Tooling scratch — screenshots and MCP browser artifacts land at the repo root.
+# Anchored with a leading slash so real assets like src/assets/hero.png survive.
+.playwright-mcp/
+/*.png
+/*.jpg
+/*.jpeg
+
+# ---------------------------------------------------------------------------
+# AI / editor tooling state — never belongs in this repo.
+#
+# These were previously only covered by machine-local files (a global gitignore
+# and .git/info/exclude), neither of which is committed. That works on one
+# machine and silently fails for everyone else who clones, so the rules live
+# here instead. Anything a tool generates about the project is disposable; only
+# the project itself is tracked.
+# ---------------------------------------------------------------------------
+.claude/
+.impeccable/
+.remember/
+.cursor/
+.windsurf/
+.aider*
+.continue/
+.mcp.json
+
 # OS / editor files
 .DS_Store
 Thumbs.db
+desktop.ini
 .idea/
 .vscode/
+*.swp
