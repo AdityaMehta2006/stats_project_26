@@ -146,10 +146,17 @@ daily history (we use 2015–2025), split/dividend-adjusted prices, and ticker s
 **Limitations** documented by practitioners and researchers: occasional data errors
 and gaps, silent changes to the (unofficial) API, possible survivorship bias for
 delisted names, and adjusted-price conventions that can differ from other vendors.
-Our project encountered exactly such an issue — a corrupted cache in which the
-volatility and oil series had been cross-seeded — which we detected via
-range-validation and corrected. This real example reinforces the literature's advice
-to validate vendor data rather than trust it blindly.
+Our project encountered a more insidious variant. We first observed cross-seeded
+series (the volatility and oil caches holding each other's data), detected by
+range-validation. Tracing it revealed the mechanism: **the `yfinance` client is not
+thread-safe**, and concurrent `yf.download()` calls silently return one ticker's
+data labelled as another's. A deliberately threaded scan reproduced the fault
+immediately — three separate ticker pairs returned byte-identical frames. The
+failure is silent, plausible-looking, and would not be caught by any test that only
+checks for missing data. We now serialize downloads behind a lock. This reinforces
+the literature's advice to validate vendor data rather than trust it blindly, and
+adds a caveat we did not find stated in the sources we reviewed: with an unofficial
+client, validate the *access pattern*, not only the values.
 
 ### 9.3 DBnomics (fallback)
 DBnomics aggregates and re-serves public economic datasets (including FRED) through a
@@ -160,7 +167,8 @@ does not halt the study — a basic but important reliability practice.
 Informed by the above: (i) range / sanity validation of every cached series;
 (ii) fault-tolerant assembly (a failed factor is skipped, not fatal);
 (iii) provider redundancy (FRED + DBnomics; Yahoo `^TNX` substituting for a flaky
-FRED daily series); and (iv) local caching for reproducibility.
+FRED daily series); (iv) local caching for reproducibility, with an age check so
+cached data cannot silently go stale; and (v) serialized downloads, per §9.2.
 
 ---
 
@@ -172,12 +180,25 @@ across sub-fields and is largely academic. Three gaps motivate this project:
 1. **Integration.** Few accessible tools bring macro-factor, volatility, and
    cointegration analysis together for an arbitrary, user-chosen asset.
 2. **Interpretation.** Statistical output (p-values, persistence, z-scores) is
-   opaque to non-specialists; we add a grounded natural-language explanation layer.
-3. **Actionability.** We reframe each detected anomaly as a ranked *opportunity* with
-   a transparent severity and confidence, rather than a static report.
+   opaque to non-specialists; we add a grounded natural-language explanation layer,
+   constrained to explain rather than compute and audited against the figures it
+   was given.
+3. **Actionability.** We reframe each detected anomaly as an *opportunity* and then
+   go one step further: the signals are **fused** into a single verdict, weighted by
+   each detector's own statistical reliability (cointegration p-value, regression
+   R², sample size). Conviction *falls* when detectors disagree, and dissenting
+   signals are displayed rather than averaged away — the aggregation stays legible
+   instead of becoming another opaque score.
 
 Our contribution is an integrated, explainable **opportunity-detection dashboard**
 that operationalises the anomaly literature on live data.
+
+**Acknowledged limitation.** The inferential claims are not yet fully hardened. In
+particular the pairwise cointegration sweep runs C(n,2) tests without a
+multiple-comparisons correction (Benjamini–Hochberg being the natural remedy), the
+monthly regression uses OLS standard errors where Newey-West HAC errors are
+appropriate given autocorrelated residuals, and the pair signals are generated
+in-sample. These are known, scoped, and next in the work plan.
 
 ---
 

@@ -1,189 +1,256 @@
-# QuantAnomalies — Project Documentation & Story
+# QuantAnomalies — What It Is and What Is Built
 
-> A statistical and AI-assisted dashboard that hunts for **market anomalies** in
-> equities and forex and reframes them as **opportunities** — explained in plain
-> English by a local AI analyst.
+> A statistical dashboard that hunts for **market anomalies** in equities and
+> forex, fuses them into one verdict, and has a **local AI** explain the result
+> in plain English — without ever letting the AI touch the numbers.
+
+*Last updated: 26 July 2026. Figures below were recomputed from live code on
+that date.*
 
 ---
 
-## 1. The Big Idea (in plain terms)
+## 1. The idea in one paragraph
 
-Classic finance theory (the "Efficient Market Hypothesis") makes three tidy
-assumptions: prices instantly reflect all information, risk is roughly constant,
-and you cannot predict returns. Decades of evidence show reality is messier — and
-those mismatches are recurring, studied patterns called **anomalies**.
+Textbook finance says prices reflect everything, risk is constant, and returns
+are unpredictable. Decades of evidence say otherwise, and the mismatches are
+recurring, studied patterns called **anomalies**. An anomaly is just an
+opportunity seen from the other side: the same crack academics flag as "the
+model is wrong here" is where a careful observer might find an edge. This
+project makes three such anomalies measurable, fuses them into a single
+directional read, and explains it.
 
-Our insight: an anomaly is just an **opportunity** seen from the other side. The
-same crack in the theory that academics flag as "the model is wrong here" is
-exactly where a careful observer might find an edge. QuantAnomalies makes three of
-these anomalies visible, measurable, and actionable, then layers an AI analyst on
-top to explain what it finds.
-
-The three anomalies, as opportunities:
-
-| Anomaly (textbook says…) | Reality (opportunity) | Layman analogy |
+| Textbook says… | Reality (the opportunity) | Analogy |
 |---|---|---|
-| Prices react instantly | Macro news ripples over **weeks** (lagged effects) | A stone in a pond — the ripple takes time to reach the edge |
-| Risk is constant | Volatility **clusters**; tails are **fat** | Storms come in clusters, and big ones hit more often than forecast |
-| Returns are unpredictable | Some pairs are **cointegrated** (tethered) | Two dogs on one leash — they wander but snap back together |
+| Prices react instantly | Macro news ripples over **weeks** | A stone in a pond — the ripple takes time to reach the edge |
+| Risk is constant | Volatility **clusters**, tails are **fat** | Storms come in clusters, and big ones hit more often than forecast |
+| Returns are unpredictable | Some pairs are **cointegrated** | Two dogs on one leash — they wander, then snap back |
 
 ---
 
-## 2. What the Project Does
-
-A full-stack web application with five areas:
-
-1. **Overview** — what the project is and how to navigate it.
-2. **Opportunities** — the recommendation engine: an automated scan that ranks
-   what's unusual/actionable right now, with an optional AI analyst note.
-3. **Macro Regression** — which macro forces drive an asset, and with what lag.
-4. **GARCH Volatility** — how risk changes over time, and how fat the tails are.
-5. **Pair Trading** — cointegrated forex pairs and mean-reversion signals.
-
-Everything is **dynamic**: the user can type any ticker (stock, index, crypto,
-future) or pick any combination of 45 forex pairs, and the analysis regenerates.
-
----
-
-## 3. Architecture
+## 2. Architecture
 
 ```
-            ┌─────────────────────────────┐
-            │   React + Vite frontend     │   5 tabs, Recharts, framer-motion
-            │   (quant-terminal UI)       │   time filters, info tooltips
-            └──────────────┬──────────────┘
-                           │  HTTP (JSON)
-            ┌──────────────▼──────────────┐
-            │   FastAPI backend (Python)  │
-            │   3 analysis pillars +      │
-            │   recommendation engine     │
-            └───┬───────────────┬─────────┘
-                │               │
-   ┌────────────▼───┐   ┌───────▼────────────┐   ┌──────────────────────┐
-   │ Data layer     │   │ Local LLM (GPU)    │   │ External data APIs    │
-   │ yfinance +FRED │   │ llama.cpp server   │   │ Yahoo Finance, FRED,  │
-   │ CSV cache      │   │ Qwen3-4B, Vulkan   │   │ DBnomics (backup)     │
-   └────────────────┘   └────────────────────┘   └──────────────────────┘
+        ┌────────────────────────────────┐
+        │  React + Vite frontend         │  5 tabs · Recharts · framer-motion
+        │  light/dark · shared ticker    │  SSE narration · skeletons
+        └───────────────┬────────────────┘
+                        │  HTTP JSON + Server-Sent Events
+        ┌───────────────▼────────────────┐
+        │  FastAPI backend               │
+        │   ▸ engine.py — the fusion     │  normalise → weight → fuse → rank
+        │   macro · GARCH · pairs · BS   │  pillars stay independently callable
+        └───┬──────────────────┬─────────┘
+            │                  │
+   ┌────────▼───────┐  ┌───────▼──────────┐
+   │ data_loader.py │  │ llm_client.py    │  explains only, never computes
+   │ yfinance, FRED │  │ llama.cpp, Qwen3 │
+   └────────────────┘  └──────────────────┘
 ```
 
 **Stack:** Python · FastAPI · pandas/numpy · statsmodels · arch · scipy ·
-React 19 · Vite · Recharts · framer-motion · llama-cpp / llama.cpp (GPU).
+React 19 · Vite · Recharts · framer-motion · llama.cpp. No frontend
+dependency was added for any of the recent work.
 
 ---
 
-## 4. The Three Pillars
+## 3. The three pillars (the signal sources)
 
-### Pillar 1 — Macro Factor & Lag Regression  ·  `backend/analysis/macro_regression.py`
-**Question:** Which macro forces move an asset, and how quickly?
-**Method:** Build a monthly dataset of the asset's return plus eight factors
-(VIX, oil, gold, US dollar, 10-yr yield, Fed Funds, inflation, unemployment). Run
-OLS regression with **time lags** (0–3 months), Granger-causality tests, and a
-lagged-correlation heatmap.
-**Opportunity:** If a factor predicts returns weeks ahead, that lag is a window to
-position before the move. (Sample: S&P 500 R²≈0.64 monthly.)
+### Pillar 1 — Macro factor & lag regression · `analysis/macro_regression.py`
+**Question:** which macro forces move an asset, and with what delay?
+**Method:** monthly OLS of the asset's return on eight factors (VIX, oil, gold,
+dollar index, 10-yr yield, Fed Funds, inflation, unemployment) at lags 0–3,
+plus Granger causality and a lagged-correlation heatmap. Factors are
+**z-score standardised** before fitting, so coefficients are comparable
+"standardised betas" — the effect per 1-SD move. VIX enters as a log-change
+for stationarity.
+**Current:** `^GSPC` R² = **0.687** (adj. 0.585); Granger runs 32 tests, **6
+significant**.
 
-### Pillar 2 — GARCH & Volatility Clustering  ·  `backend/analysis/garch.py`
-**Question:** How does risk change over time, and are crashes under-estimated?
-**Method:** Fit a **GARCH(1,1)** model to daily returns to estimate day-by-day
-volatility; test clustering via autocorrelation of squared returns (Ljung-Box);
-test normality (Jarque-Bera, QQ plot, skew/kurtosis).
-**Opportunity:** A high-volatility regime is a cue to reduce risk; calm regimes can
-precede expansions. Fat tails warn that standard risk measures understate danger.
-(Sample: persistence ≈ 0.9955, excess kurtosis ≈ 16 — strongly non-normal.)
+### Pillar 2 — GARCH & volatility clustering · `analysis/garch.py`
+**Question:** how does risk change over time, and are crashes under-estimated?
+**Method:** GARCH(1,1) with Student-t errors on daily returns; Ljung-Box on
+squared returns for clustering; Jarque-Bera + QQ for normality.
+**Current:** `^GSPC` persistence = **0.9941** over 2,905 observations; excess
+kurtosis **15.8**, skew **−0.65**, Jarque-Bera p ≈ 0 — decisively non-normal.
 
-### Pillar 3 — Forex Pair Trading  ·  `backend/analysis/pairs.py`
-**Question:** Which currency pairs are tethered, and when is the gap tradeable?
-**Method:** Engle-Granger **cointegration** across all pair combinations; for the
-best pair, build a hedge-ratio **spread**, standardise it to a **z-score**, and
-generate buy/sell/exit signals (enter beyond ±2, exit near 0); estimate the
-mean-reversion **half-life**.
-**Opportunity:** Market-neutral "statistical arbitrage" — profit from the gap
-closing regardless of overall market direction. (Sample: USDCHF/USDJPY
-cointegrated, p≈0.008, half-life ≈ 64 days.)
+### Pillar 3 — Forex pair trading · `analysis/pairs.py`
+**Question:** which currency pairs are tethered, and when is the gap tradeable?
+**Method:** Engle-Granger cointegration across all pair combinations; for the
+best pair, a hedge-ratio spread on **log prices**, standardised to a z-score,
+with entry beyond ±2 and exit near 0, plus a mean-reversion half-life.
+**Current:** USDCHF/USDJPY, p = **0.0075**, half-life **69 days**, hedge ratio
+−0.339, 91 historical signals.
 
----
-
-## 5. The Recommendation Engine — "stats detect, AI explains"
-`backend/analysis/recommender.py` · `backend/llm_client.py`
-
-This is the layer that turns a dashboard into a recommender. The principle:
-**deterministic statistics do the detecting; the AI only explains.** The model is
-handed the detected numbers and is instructed never to invent figures — which is
-what makes a small local model trustworthy here.
-
-**Detectors (v1):**
-- **Volatility regime** — current GARCH volatility vs its own history.
-- **Tail event** — today's move measured in standard deviations.
-- **Trend** — price vs 50/200-day averages, near 52-week highs/lows.
-- **Forex mean-reversion** — cointegrated pair stretched beyond ±2 z-score.
-
-Each emits a signal with a 0–1 **severity**; the engine ranks them and computes an
-overall **confidence**. A rules-based summary always works; the **local LLM**
-(Qwen3-4B on the GPU) adds a plain-English analyst note in ~4 seconds.
+### Also present — Black–Scholes · `analysis/black_scholes.py`
+European call/put pricing, the five Greeks, and a Newton/bisection implied-vol
+solver, served at `/api/options/black-scholes`. It computes a `vol_verdict`
+(options rich or cheap versus the GARCH forecast) but nothing consumes it yet.
 
 ---
 
-## 6. Data Pipeline & Robustness  ·  `backend/data_loader.py`
+## 4. The decision engine — `backend/engine.py`
 
-- **Sources:** Yahoo Finance (prices) and FRED (macro), cached as CSV so the app
-  runs offline once data is fetched.
-- **Resilience we built in:**
-  - FRED downloads were failing (HTTP 403) — fixed with a proper request header,
-    plus a **DBnomics** fallback mirror.
-  - The flaky FRED 10-year series was replaced by Yahoo's `^TNX`.
-  - `build_macro_dataset` is **fault-tolerant**: if one factor source fails, that
-    factor is skipped instead of breaking the whole study.
-  - A data-integrity bug (the VIX and oil caches had been seeded with the wrong
-    series) was detected and corrected; all series now validate to real ranges.
+This is the layer that turns three separate reports into one answer. The
+pillars are untouched and still individually callable; the engine sits above
+them.
 
----
+**Seven detectors** feed it (`analysis/recommender.py`): volatility regime,
+tail event, macro dislocation, pairs opportunity, trend, breakout, relative
+performance.
 
-## 7. The Dashboard (UI)
+**Normalisation.** The detectors speak seven different direction vocabularies
+("uptrend", "above_model", "long spread", "compressed"…). A `POLARITY` map
+collapses them onto one bull/bear/neutral axis so they can be compared at all.
+Volatility and tail readings are routed to a **separate risk axis** so a vol
+spike can never fake a directional call. Each signal also carries a
+`reliability` derived from its own statistics — cointegration p-value, macro
+R², GARCH sample size — never invented.
 
-- A dark **"quant terminal"** theme (deep navy, teal/cyan data, gold highlights),
-  custom **SVG icon set** (no emojis), and a subtle SVG grid backdrop.
-- **Hover info-tooltips** explain every metric in plain English.
-- **Time-range filters** (1M–All) on every time-series chart, with the y-axis
-  auto-scaling to the visible window.
-- **framer-motion** polish: animated tab transitions, sliding active indicators,
-  and animated confidence/severity bars.
+**Fusion.** Weight `w = severity × reliability`, then:
 
----
+```
+tilt        = (bull − bear) / (bull + bear)      direction, −1..+1
+agreement   = 1 − min(bull,bear)/max(bull,bear)  how one-sided
+mass        = 1 − exp(−total / 2)                saturating evidence weight
+conviction  = mass × (0.4 + 0.6 × agreement)
+```
 
-## 8. The Story So Far (how we got here)
+Strength beats count, nothing pins to 1.0 on noise, and a signal pointing the
+other way actively *lowers* conviction. This replaced an earlier
+`0.2 + 0.15·n + 0.3·top` line that was dominated by signal count and clamped
+to 1.0 the moment six of anything showed up.
 
-1. **Revived a broken project.** The app wouldn't run — the `python` command was
-   pointing at a dead path; we located the working Anaconda interpreter and got it
-   running again.
-2. **Fixed the data.** Repaired FRED access, added fallbacks, swapped the flaky
-   10-yr source to Yahoo, and cleaned corrupted caches so every value is sane.
-3. **Enriched the analysis.** Added gold and the dollar index as macro factors and
-   made the dataset builder fault-tolerant.
-4. **Redesigned the interface.** New professional theme, SVG icons, explanatory
-   copy, hover tooltips, and a stealth SVG background.
-5. **Built the recommendation engine.** Four anomaly/opportunity detectors plus a
-   provider-agnostic AI client.
-6. **Put the AI on the GPU.** Switched the local model from CPU to the RTX 4050 via
-   the bundled Vulkan `llama.cpp` server — a ~6× speed-up (25s → ~4s).
-7. **Added time filters and motion.** Interactive ranges and a proper animation
-   pass across the app.
+**Tiered scan.** Price detectors run broad and cheap; one cointegration sweep
+serves the whole FX basket; GARCH is cached on `(ticker, last_data_date)` so
+it refits once per trading day regardless of request volume. A detector that
+fails is recorded in `diagnostics`, never raised — one dead factor costs one
+signal, not the verdict. Measured warm: feed **11 ms**, per-asset **4.5 ms**,
+off-universe cold **0.9 s**.
+
+**Endpoints:** `/api/engine/{feed,asset,narrate,status}`, alongside the
+unchanged per-pillar routes used for drill-down.
 
 ---
 
-## 9. What's Next
+## 5. The AI layer — "stats detect, the LLM explains"
 
-Tracked in `TODO.md`: standardised factor comparisons (so "which factor matters
-most" is fair), an **options / Black–Scholes** module (implied-vs-model volatility
-as another opportunity signal), more detectors (macro dislocation, breakout),
-news-on-chart-click, and a back-test of the signals to turn "opportunities" into
-measured evidence.
+The model receives the computed detections as compact JSON and is instructed
+to use only those numbers. It never feeds back into the fusion. Three things
+make that verifiable rather than merely asserted:
+
+- **Stance-first streaming.** The prompt demands a `STANCE:` line before the
+  prose, so the model's labelled opinion lands after ~10 tokens and the
+  reasoning streams beneath it instead of blocking for ~20 s.
+- **The model may disagree.** Its stance renders *beside* the computed stance,
+  so a divergence is visible rather than hidden.
+- **A number guardrail.** `unverified_numbers()` checks every figure in the
+  narrative against the evidence supplied; anything unmatched surfaces in the
+  UI as a grounding badge.
+
+Runtime is a local `llama.cpp` server (Qwen3-4B) on an RTX 4050 via Vulkan,
+with an in-process CPU fallback and a rules-only path if no model is up. Nothing
+leaves the machine.
 
 ---
 
-## 10. How to Run
+## 6. Data pipeline · `backend/data_loader.py`
 
-- **Backend:** `python -m uvicorn main:app --app-dir backend --port 8000`
-  (use the Anaconda interpreter on this machine).
-- **GPU AI server (optional but recommended):**
-  `llama-server.exe -m <Qwen3-4B gguf> -ngl 99 -c 4096 --port 8080`
-- **Frontend:** `npm run dev` in `frontend/` → open `http://localhost:5173`.
+Yahoo Finance for prices, FRED for macro, cached as CSV so the app runs
+offline once fetched. What we hardened, and why:
+
+- FRED was returning **HTTP 403** — fixed with a proper request header, plus a
+  **DBnomics** mirror as fallback. The flaky 10-yr series was swapped for
+  Yahoo's `^TNX`.
+- `build_macro_dataset` is **fault-tolerant**: a failed factor is skipped, not
+  fatal.
+- **`yfinance` is not thread-safe.** Concurrent `yf.download()` calls silently
+  return one ticker's data under another's name — a threaded scan reproduced it
+  instantly (META/TSLA, JPM/GLD, ^IXIC/^DJI came back byte-identical). This was
+  the root cause of the "corrupted cache" we had previously only patched.
+  Downloads are now serialised behind a lock; cached reads stay parallel.
+- **Freshness:** the end date had been hardcoded to `2025-12-31` and caches
+  never expired, so the dashboard was reasoning over seven-month-old data. Now
+  a rolling end date plus an mtime staleness check, with a failed refresh
+  falling back to the stale copy rather than to nothing.
+- **`run_granger_causality` was silently dead** — it passed a `verbose` kwarg
+  removed in statsmodels 0.14, and a bare `except` swallowed the `TypeError`,
+  so it always returned zero results. Fixed.
+
+---
+
+## 7. The dashboard
+
+**Design rule: colour means direction, and nothing else gets to use it.**
+Bull/bear are the only hues. Severity is bar length, source is a label, risk is
+a segmented meter.
+
+- **Two-tier readout.** Every metric gives a plain-English word in the primary
+  slot, the exact figure beside it, and the mechanism in a hover tip. One
+  element serves a beginner and a trader; nothing needed to read the screen is
+  behind a click. The wording layer is `frontend/src/verdict.js`.
+- **Tilt gauge** (`common/TiltGauge.jsx`) — one instrument replacing four
+  readouts: marker = balance of evidence, band width = inverse conviction, so
+  it reads like a confidence interval.
+- **Dissent is visible.** Signals opposing the verdict render under "Pushing
+  the other way" instead of being averaged away.
+- **Drill-down.** A signal's source badge jumps to the pillar tab that produced
+  it.
+- **Dual theme.** Light by default (it survives a projector), dark follows the
+  OS, three-state toggle. All 30 token pairings verified ≥ 4.5:1 contrast in
+  both schemes.
+- **Type & layout.** Archivo (variable) + JetBrains Mono; five sizes replacing
+  32 ad-hoc values; bento grids that tile exactly at every breakpoint; signals
+  as a hairline list rather than a card grid.
+- **Shared ticker** across all five tabs via context — panels used to hold a
+  private `useState("^GSPC")`, so switching tabs reset the asset.
+- **Skeletons** matched to the layout on first load, dim-in-place on refetch;
+  a session cache (stale-while-revalidate) removed the jank on tab switches.
+- **Status strip** reads `/api/engine/status`: live / warming / offline. The
+  dot used to be hardcoded green, including when the backend was down.
+- **Time-range filters** (1M–All) on every time series, y-axis autoscaling to
+  the visible window.
+
+---
+
+## 8. Testing & verification
+
+- `backend/test_engine.py` — 25 cases over the polarity map, fusion
+  invariants, ranking stability, reliability derivation, stance parsing, and
+  the number guardrail. These are the first tests in the repo.
+- An unknown ticker used to return **500** quoting an internal cache key.
+  `data_loader` now raises `NoDataError` and the API answers **404** with a
+  readable message — one handler covers every endpoint, since all data access
+  routes through `_load_or_download`.
+- `npm run lint` is clean.
+- Design-hook detector: 8 findings → 0. Contrast verified in both themes.
+
+---
+
+## 9. What's next
+
+Tracked in `TODO.md`. The largest remaining gap is **statistical rigor**: the
+detectors are built but several inferential claims are unvalidated —
+multiple-testing correction on the 990 cointegration tests, HAC/Newey-West
+errors on the autocorrelated monthly regression, differencing the level-valued
+macro series, out-of-sample GARCH VaR with a Kupiec test, and removing
+look-ahead bias from the pair-signal generation. After that: wiring the
+Black–Scholes vol-mispricing detector into the engine, news-on-chart-click, and
+a backtest that turns "opportunities" into measured evidence.
+
+---
+
+## 10. How to run
+
+```bash
+# Backend (use the Anaconda interpreter on this machine)
+python -m uvicorn main:app --app-dir backend --port 8000
+
+# Local AI, optional but recommended
+llama-server.exe -m <Qwen3-4B gguf> -ngl 99 -c 4096 --port 8080
+
+# Frontend
+cd frontend && npm run dev      # http://localhost:5173
+```
+
+Without the AI server the app runs fine — narration falls back to in-process
+CPU (~5.7 s) and then to a rules-only summary.
