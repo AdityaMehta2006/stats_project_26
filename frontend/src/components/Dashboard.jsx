@@ -41,10 +41,31 @@ const PILLARS = [
     tags: ["Cointegration", "Z-Score", "Mean Reversion"],
     nav: "pairs",
   },
+  {
+    id: "options",
+    icon: "options",
+    iconClass: "options",
+    title: "Options Pricing & Volatility Surface",
+    description:
+      "Prices options with Black-Scholes, Merton jump-diffusion and Heston stochastic volatility using live market inputs — including a GARCH volatility forecast. Shows why Black-Scholes implies a flat volatility curve while real markets are skewed.",
+    tags: ["Black-Scholes", "Greeks", "Volatility Smile", "Implied Vol"],
+    nav: "options",
+  },
+  {
+    id: "stochastic",
+    icon: "stochastic",
+    iconClass: "stochastic",
+    title: "Stochastic Processes",
+    description:
+      "The differential equations underneath everything else: Brownian motion, geometric Brownian motion, Ornstein-Uhlenbeck (the process pair trading assumes), CIR and Heston — with numerical schemes and variance reduction compared against exact solutions.",
+    tags: ["Itô's Lemma", "SDEs", "Monte Carlo", "Euler vs Milstein"],
+    nav: "stochastic",
+  },
 ];
 
 const HERO_STATS = [
-  { value: "3", label: "Analysis Pillars" },
+  { value: "5", label: "Analysis Pillars" },
+  { value: "13", label: "Signal Detectors" },
   { value: "40+", label: "FX Pairs" },
   { value: "10Y", label: "Daily History" },
 ];

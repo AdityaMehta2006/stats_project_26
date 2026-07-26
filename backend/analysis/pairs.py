@@ -18,10 +18,10 @@ for the price chart so users always see real exchange rates.
 import numpy as np
 import pandas as pd
 from itertools import combinations
-from statsmodels.tsa.stattools import adfuller, coint
+from statsmodels.tsa.stattools import coint
 import statsmodels.api as sm
 
-from data_loader import get_forex, get_available_forex
+from data_loader import get_forex
 
 
 def run_cointegration_tests(pair_labels: list = None) -> dict:
@@ -176,6 +176,55 @@ def get_best_pair_analysis(pair_labels: list = None) -> dict:
         "signals": signals,
         "total_signals": len(signals),
         "spread_type": "log",
+    }
+
+
+def get_full_spread(pair_labels: list = None) -> dict:
+    """
+    The best pair's spread at **full daily resolution**, for downstream modelling.
+
+    `get_best_pair_analysis` subsamples its `spread_series` for the chart (one
+    point per ~3 days on a 10-year history). Fitting a time-series model to that
+    subsample silently changes the time step: an Ornstein-Uhlenbeck fit would
+    return kappa per 3 days, and the resulting half-life would be understated by
+    the same factor. This accessor exists so estimation always uses dt = 1 day.
+
+    Returns the spread values plus the hedge ratio and cointegration p-value, so
+    a caller can fit the OU process on exactly the series the strategy trades.
+    """
+    forex = get_forex(pair_labels).dropna()
+    pairs_list = list(forex.columns)
+    if len(pairs_list) < 2:
+        return {"error": "Need at least 2 forex pairs for analysis"}
+
+    log_forex = np.log(forex)
+
+    best_pair, best_pvalue = None, 1.0
+    for a, b in combinations(pairs_list, 2):
+        try:
+            _, pvalue, _ = coint(log_forex[a], log_forex[b])
+            if pvalue < best_pvalue:
+                best_pvalue, best_pair = pvalue, (a, b)
+        except Exception:
+            continue
+    if best_pair is None:
+        best_pair = (pairs_list[0], pairs_list[1])
+
+    a, b = best_pair
+    X = sm.add_constant(log_forex[b])
+    model = sm.OLS(log_forex[a], X).fit()
+    hedge_ratio = float(model.params.iloc[1])
+    spread = log_forex[a] - hedge_ratio * log_forex[b]
+
+    return {
+        "pair_a": a,
+        "pair_b": b,
+        "hedge_ratio": round(hedge_ratio, 6),
+        "coint_pvalue": round(float(best_pvalue), 6),
+        "spread": [float(v) for v in spread.values],
+        "dates": [d.strftime("%Y-%m-%d") for d in spread.index],
+        "n_obs": int(len(spread)),
+        "frequency": "daily (dt = 1 trading day)",
     }
 
 

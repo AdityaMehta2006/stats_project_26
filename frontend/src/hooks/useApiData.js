@@ -22,6 +22,7 @@ export default function useApiData(fetcher, deps = []) {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/use-memo, react-hooks/exhaustive-deps
   }, deps);
 
   useEffect(() => {

@@ -6,6 +6,8 @@ import MacroRegression from "./components/MacroRegression";
 import GarchVolatility from "./components/GarchVolatility";
 import PairTrading from "./components/PairTrading";
 import Recommendations from "./components/Recommendations";
+import OptionsPricing from "./components/OptionsPricing";
+import StochasticModels from "./components/StochasticModels";
 import Icon from "./components/common/Icon";
 import BgPattern from "./components/common/BgPattern";
 
@@ -15,6 +17,8 @@ const TABS = [
   { id: "macro",         label: "Macro",           icon: "trendingUp" },
   { id: "garch",         label: "GARCH",           icon: "activity" },
   { id: "pairs",         label: "Pairs",           icon: "exchange" },
+  { id: "options",       label: "Options",         icon: "options" },
+  { id: "stochastic",    label: "Stochastic",      icon: "stochastic" },
 ];
 
 export default function App() {
@@ -26,6 +30,8 @@ export default function App() {
       case "macro":         return <MacroRegression />;
       case "garch":         return <GarchVolatility />;
       case "pairs":         return <PairTrading />;
+      case "options":       return <OptionsPricing />;
+      case "stochastic":    return <StochasticModels />;
       default:              return <Dashboard onNavigate={setActiveTab} />;
     }
   };
