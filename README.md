@@ -81,7 +81,23 @@ stats_project_26/
 
 ## Quick Start
 
-### 1. Backend Setup
+### Run Entire App (Single Command)
+
+```bash
+# Run launcher script directly
+./scripts/run.sh
+
+# Or via npm from root directory
+npm start
+```
+This starts both the FastAPI backend and Vite frontend, outputting the URLs:
+- **Frontend Dashboard**: `http://localhost:5173`
+- **Backend API**: `http://127.0.0.1:8000`
+- **Interactive Swagger Docs**: `http://127.0.0.1:8000/docs`
+
+---
+
+### Manual Setup (Step-by-Step)
 
 ```bash
 # Navigate to project root and activate virtual environment
