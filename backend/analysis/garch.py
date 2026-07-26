@@ -10,7 +10,6 @@ Pillar 2: GARCH & Volatility Clustering
 """
 
 import numpy as np
-import pandas as pd
 from arch import arch_model
 from scipy import stats as sp_stats
 from statsmodels.stats.diagnostic import acorr_ljungbox
@@ -31,7 +30,6 @@ def fit_garch(ticker: str = "^GSPC", p: int = 1, q: int = 1, dist: str = "t") ->
 
     # Conditional volatility
     cond_vol = result.conditional_volatility
-    std_resid = result.std_resid.dropna()
 
     # Parameters
     params = {}

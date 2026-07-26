@@ -52,7 +52,18 @@ for f in os.listdir(DATA_DIR):
         os.remove(fpath)
 
 START = "2015-01-01"
-END = "2025-12-31"
+
+# END must track the present, not a hardcoded date. It was previously pinned to
+# "2025-12-31", which silently froze every price series at that date: months
+# later the dashboard was still reporting a stale spot as "latest", and any
+# comparison against a live option chain was measuring the gap between a current
+# quote and a months-old underlying rather than anything economic.
+END = datetime.today().strftime("%Y-%m-%d")
+
+# A cached series is considered stale once its last observation is this many
+# calendar days behind today. Seven days absorbs weekends and public holidays
+# without triggering a needless refetch, while still catching real drift.
+STALE_AFTER_DAYS = 7
 
 
 
@@ -69,24 +80,82 @@ def _cache_path(name: str) -> str:
     return os.path.join(DATA_DIR, f"{_safe_filename(name)}.csv")
 
 
-def _load_or_download(name: str, downloader):
-    """Load from CSV cache, or download and cache."""
+def _load_or_download(name: str, downloader, allow_stale: bool = False):
+    """
+    Load from the CSV cache, or download and cache.
+
+    The cache is refreshed when its most recent observation falls more than
+    STALE_AFTER_DAYS behind today. Without this check a cache written months ago
+    is served forever, and every "latest price" in the app is silently wrong —
+    which is exactly the bug this guard was added to fix.
+
+    Monthly macro series (`allow_stale=True`) are exempt, because official
+    statistics are published with a genuine multi-week lag and re-downloading
+    them daily would only burn requests.
+
+    If a refresh attempt fails (offline, API down), the stale cache is returned
+    rather than raising: degraded data beats no dashboard, and the staleness is
+    surfaced to the caller via `data_freshness`.
+    """
     path = _cache_path(name)
     if os.path.exists(path):
         df = pd.read_csv(path, index_col=0, parse_dates=True)
-        # Ensure DatetimeIndex
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index, errors="coerce")
             df = df[df.index.notna()]
+
         if len(df) > 0:
+            if allow_stale:
+                return df
+            last = df.index.max()
+            age_days = (pd.Timestamp.today().normalize() - last.normalize()).days
+            if age_days <= STALE_AFTER_DAYS:
+                return df
+            # Stale — try to refresh, but never lose what we already have.
+            print(f"[data_loader] '{name}' is {age_days}d stale (last {last.date()}); refetching")
+            try:
+                fresh = downloader()
+                if fresh is not None and len(fresh) > 0:
+                    fresh.to_csv(path)
+                    return fresh
+                print(f"[data_loader] refetch of '{name}' returned nothing; serving stale cache")
+            except Exception as e:  # noqa: BLE001 — stale data beats no data
+                print(f"[data_loader] refetch of '{name}' failed ({e}); serving stale cache")
             return df
+
         # Cached file is empty/corrupted, re-download
         os.remove(path)
+
     df = downloader()
     if df is None or len(df) == 0:
         raise ValueError(f"Download returned empty data for '{name}'")
     df.to_csv(path)
     return df
+
+
+def data_freshness(ticker: str = "^GSPC") -> dict:
+    """
+    Report how current a cached price series is.
+
+    Exposed so the UI can display a "data as of" indicator rather than implying
+    every number is live. Staleness is a property of the data worth surfacing,
+    not hiding.
+    """
+    try:
+        df = get_equity_data(ticker)
+        last = df.index.max()
+        age = (pd.Timestamp.today().normalize() - last.normalize()).days
+        return {
+            "ticker": ticker,
+            "last_observation": last.strftime("%Y-%m-%d"),
+            "age_days": int(age),
+            "rows": int(len(df)),
+            "is_fresh": bool(age <= STALE_AFTER_DAYS),
+            "stale_after_days": STALE_AFTER_DAYS,
+            "range_start": df.index.min().strftime("%Y-%m-%d"),
+        }
+    except Exception as e:
+        return {"ticker": ticker, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +305,10 @@ def _download_fred(series_id: str, name: str) -> pd.DataFrame:
 
         raise ValueError(f"Could not download FRED series '{series_id}': {'; '.join(errors[-3:])}")
 
-    return _load_or_download(name, _dl)
+    # Monthly official statistics (CPI, unemployment, Fed Funds) are published
+    # weeks after the period they describe, so a "stale" cache is normal and
+    # refetching daily would be pointless.
+    return _load_or_download(name, _dl, allow_stale=True)
 
 
 def get_fed_funds_rate() -> pd.DataFrame:

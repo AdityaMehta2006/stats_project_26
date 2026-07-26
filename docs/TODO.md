@@ -207,6 +207,56 @@ Adds an options layer that ties directly into the volatility pillar and feeds th
   tab transitions; sliding shared-layout indicators on nav + range pills; animated
   confidence/severity bars.
 
-### Still open from §1/§2 (next)
-- Detectors: macro dislocation (needs standardized betas, §3), relative cross-section, breakout.
+- **Detectors completed to 13** (§1a, §1d): added `macro_dislocation`, `breakout`,
+  `relative_performance`, plus `momentum` (12-1, risk-adjusted), `mean_reversion`
+  (RSI + displacement), `volume_anomaly`, `seasonality` (t-tested, with its own
+  multiple-testing caveat), `correlation_regime`, and `options_mispricing`
+  (variance risk premium — the link between the volatility and options pillars).
+- **Rule-based decision engine shipped** (§1e): `decision.py` nets the 13 signals
+  into one stance, conviction and position size. Reliability weighting, redundancy
+  discounting within signal families, `agreement × strength` netting with `tanh`
+  saturation, conflict demotion, a risk overlay that scales size without changing
+  direction, and a full audit trail. The LLM now receives the decision as a fact to
+  explain and is explicitly barred from changing it.
+- **Options pillar shipped** (§7): `advanced_options.py` rewritten — Bachelier,
+  closed-form Merton series, semi-analytic Heston via Fourier inversion (using the
+  Albrecher "Little Trap" formulation for branch-cut stability), Longstaff-Schwartz
+  American Monte Carlo, a robust implied-vol solver, the **implied-volatility smile**
+  generator, binomial convergence, and put-call-parity / finite-difference
+  validation. Heston Monte Carlo switched to log-Euler with full truncation.
+- **Options wired to live market data**: `market_options.py` supplies spot, a
+  continuously-compounded rate from `^TNX`, the real dividend yield, a **GARCH
+  volatility term structure** matched to option maturity, jump parameters fitted
+  from realised tails via a MAD-robust threshold, Heston seeded from GARCH
+  (`kappa = -252·ln(alpha+beta)`), a filtered live implied-vol surface, and the
+  **variance risk premium**.
+- **Stochastic-processes pillar shipped**: `stochastic.py` with Wiener, GBM, OU,
+  CIR, Merton and Heston path engines, Euler-vs-Milstein convergence, variance
+  reduction (measured 19.27× combined efficiency gain), and `fit_ou()` — an OU fit
+  to the live pair spread that independently reproduces the pairs half-life.
+- **Frontend**: two new tabs (Options, Stochastic) following the existing design
+  system, a `ParamControls` component with per-parameter explanatory tooltips, and
+  a decision panel on the Opportunities tab showing stance, conviction, evidence
+  bars and the reasoning trail. 23 → 38 endpoints.
+- **Six defects found by testing and fixed**: a deleted import breaking
+  `/api/recommendations`; a hardcoded `END` date leaving every cached price series
+  **208 days stale**; a yfinance dividend-yield unit mismatch applying a 32% yield
+  to a stock paying 0.32%; option-chain filters selecting 1-day expiries and
+  producing 374% implied vols; a maturity mismatch in the variance-risk-premium
+  comparison; and a `net_score` normalisation that pegged conviction to 100%
+  whenever no signal opposed.
+
+### Still open (next, by priority)
+- **P0 — Backtest.** The decision engine has never been evaluated for
+  profit-and-loss, Sharpe or drawdown. Needs walk-forward estimation (re-fit beta,
+  GARCH and pair selection on past data only), transaction costs, and financing.
+  This is the single highest-value remaining item.
+- **P1 — Multiple-testing correction** for pair selection (Benjamini-Hochberg, or
+  pre-specify pairs on economic grounds and test only those).
+- **P1 — Transaction costs and financing** across all signal types.
+- **P2 — Bootstrapped yield curve** so each option maturity uses a matched rate,
+  replacing the single 10Y; live per-currency rates for Garman-Kohlhagen.
+- **P2 — KPSS and structural-break tests** to complement ADF, whose power is weak
+  against the near-unit-root persistence our spread exhibits.
+- **P2 — A pytest suite** around the analytic checks that currently run inline.
 - To start the GPU server: run llama-server.exe with `-ngl 99 --port 8080` (see `llm_client.py` header).
