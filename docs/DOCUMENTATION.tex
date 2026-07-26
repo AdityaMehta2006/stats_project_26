@@ -46,7 +46,7 @@ Returns are unpredictable & Some pairs are \textbf{cointegrated} & Two dogs on o
 \section{Architecture}
 \begin{Verbatim}
         +--------------------------------+
-        |  React + Vite frontend         |  5 tabs, Recharts, framer-motion
+        |  React + Vite frontend         |  6 tabs, Recharts, framer-motion
         |  light/dark, shared ticker     |  SSE narration, skeletons
         +---------------+----------------+
                         |  HTTP JSON + Server-Sent Events
@@ -67,7 +67,7 @@ statsmodels \textbullet{} arch \textbullet{} scipy \textbullet{} React 19 \textb
 Vite \textbullet{} Recharts \textbullet{} framer-motion \textbullet{} llama.cpp. No
 frontend dependency was added for any of the recent work.
 
-\section{The Three Pillars (the signal sources)}
+\section{The Four Pillars (the signal sources)}
 
 \subsection{Pillar 1 — Macro Factor \& Lag Regression}
 \textbf{Question:} Which macro forces move an asset, and with what delay? \\
@@ -95,23 +95,31 @@ with entry beyond ±2 and exit near 0, plus a mean-reversion half-life. \\
 \textbf{Current:} USDCHF/USDJPY, p = \textbf{0.0075}, half-life \textbf{69 days},
 hedge ratio −0.339, 91 historical signals.
 
-\subsection{Also present — Black--Scholes}
+\subsection{Pillar 4 — Black--Scholes options}
 European call/put pricing, the five Greeks, and a Newton/bisection implied-volatility
-solver, served at \tk{/api/options/black-scholes}. It computes a \tk{vol\_verdict}
-(options rich or cheap versus the GARCH forecast) but nothing consumes it yet.
+solver, served at \tk{/api/options/black-scholes} and surfaced on the \textbf{Options}
+tab. Where a listed chain exists it compares the market's implied volatility to the
+asset's realised volatility and calls premium \textbf{rich} or \textbf{cheap} — the
+variance risk premium. That \tk{vol\_verdict} feeds the engine's eighth detector.
+
+The comparison volatility is \textbf{1-year realised σ, not a GARCH forecast}; every
+label in the interface says so, and the forecast remains an open item.
 
 \section{The Decision Engine}
-This is the layer that turns three separate reports into one answer. The pillars are
-untouched and still individually callable; the engine sits above them. \textbf{Seven
+This is the layer that turns four separate reports into one answer. The pillars are
+untouched and still individually callable; the engine sits above them. \textbf{Eight
 detectors} feed it: volatility regime, tail event, macro dislocation, pairs
-opportunity, trend, breakout, and relative performance.
+opportunity, trend, breakout, relative performance, and vol mispricing.
 
 \subsection{Normalisation}
-The detectors speak seven different direction vocabularies (``uptrend'',
-``above\_model'', ``long spread'', ``compressed''\ldots). A polarity map collapses
-them onto one bull/bear/neutral axis so they can be compared at all. Volatility and
-tail readings are routed to a \textbf{separate risk axis}, so a volatility spike can
-never fake a directional call. Each signal also carries a \textbf{reliability}
+The detectors speak eight different direction vocabularies (``uptrend'',
+``above\_model'', ``long spread'', ``compressed'', ``rich''\ldots). A polarity map
+collapses them onto one bull/bear/neutral axis so they can be compared at all.
+Volatility and tail readings are routed to a \textbf{separate risk axis}, so a
+volatility spike can never fake a directional call. Vol mispricing is mapped to
+polarity 0 and kept off the risk axis too: expensive option premium is a
+relative-value read, so it reports itself without moving the verdict either way.
+Each signal also carries a \textbf{reliability}
 derived from its own statistics — cointegration p-value, macro R², GARCH sample
 size — never invented.
 
@@ -209,7 +217,7 @@ OS, three-state toggle. All 30 token pairings verified at ≥4.5:1 contrast in b
 \item \textbf{Type \& layout.} Archivo (variable) + JetBrains Mono; five sizes
 replacing 32 ad-hoc values; bento grids that tile exactly at every breakpoint; signals
 as a hairline list rather than a card grid.
-\item \textbf{Shared ticker} across all five tabs via context — panels used to hold a
+\item \textbf{Shared ticker} across all six tabs via context — panels used to hold a
 private \tk{useState("\textasciicircum{}GSPC")}, so switching tabs reset the asset.
 \item \textbf{Skeletons} matched to the layout on first load, dim-in-place on refetch;
 a session cache (stale-while-revalidate) removed the jank on tab switches.
@@ -238,8 +246,8 @@ several inferential claims are unvalidated — multiple-testing correction on th
 cointegration tests, HAC/Newey-West errors on the autocorrelated monthly regression,
 differencing the level-valued macro series, out-of-sample GARCH VaR with a Kupiec
 test, and removing look-ahead bias from the pair-signal generation. After that:
-wiring the Black--Scholes vol-mispricing detector into the engine, news-on-chart-click,
-and a backtest that turns ``opportunities'' into measured evidence.
+driving the options comparison off a GARCH volatility forecast rather than realised σ,
+news-on-chart-click, and a backtest that turns ``opportunities'' into measured evidence.
 
 \section{How to Run}
 \begin{itemize}

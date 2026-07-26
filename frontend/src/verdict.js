@@ -55,6 +55,8 @@ export const DETECTOR_TIPS = {
     "Price versus its recent high/low range. Flags a new extreme, or a squeeze where the range has narrowed without resolving yet.",
   relative_performance:
     "How this asset is doing against the rest of the scanned universe today.",
+  vol_mispricing:
+    "Compares the volatility the option market is charging for with the volatility the asset has actually realised. It says premium is expensive or cheap — not which way price is going.",
 };
 
 /** Which tab owns each detector, for drill-down. Price rules have no tab. */
@@ -62,6 +64,7 @@ export const SOURCE_TAB = {
   garch: "garch",
   macro: "macro",
   pairs: "pairs",
+  options: "options",
   price: null,
 };
 
@@ -69,6 +72,7 @@ export const SOURCE_LABEL = {
   garch: "GARCH",
   macro: "Macro",
   pairs: "Pairs",
+  options: "Options",
   price: "Price rule",
 };
 

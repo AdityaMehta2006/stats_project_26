@@ -31,7 +31,7 @@ directional read, and explains it.
 
 ```
         ┌────────────────────────────────┐
-        │  React + Vite frontend         │  5 tabs · Recharts · framer-motion
+        │  React + Vite frontend         │  6 tabs · Recharts · framer-motion
         │  light/dark · shared ticker    │  SSE narration · skeletons
         └───────────────┬────────────────┘
                         │  HTTP JSON + Server-Sent Events
@@ -53,7 +53,7 @@ dependency was added for any of the recent work.
 
 ---
 
-## 3. The three pillars (the signal sources)
+## 3. The four pillars (the signal sources)
 
 ### Pillar 1 — Macro factor & lag regression · `analysis/macro_regression.py`
 **Question:** which macro forces move an asset, and with what delay?
@@ -81,28 +81,35 @@ with entry beyond ±2 and exit near 0, plus a mean-reversion half-life.
 **Current:** USDCHF/USDJPY, p = **0.0075**, half-life **69 days**, hedge ratio
 −0.339, 91 historical signals.
 
-### Also present — Black–Scholes · `analysis/black_scholes.py`
+### Pillar 4 — Black–Scholes options · `analysis/black_scholes.py`
 European call/put pricing, the five Greeks, and a Newton/bisection implied-vol
-solver, served at `/api/options/black-scholes`. It computes a `vol_verdict`
-(options rich or cheap versus the GARCH forecast) but nothing consumes it yet.
+solver, served at `/api/options/black-scholes` and surfaced on the **Options**
+tab. Where a listed chain exists it compares the market's implied volatility to
+the asset's realised volatility and calls premium **rich** or **cheap** — the
+variance risk premium. That `vol_verdict` feeds the engine's eighth detector.
+
+The comparison vol is **1-year realised σ, not a GARCH forecast** (see TODO §7
+for the open forecast item), and every label in the UI says so.
 
 ---
 
 ## 4. The decision engine — `backend/engine.py`
 
-This is the layer that turns three separate reports into one answer. The
+This is the layer that turns four separate reports into one answer. The
 pillars are untouched and still individually callable; the engine sits above
 them.
 
-**Seven detectors** feed it (`analysis/recommender.py`): volatility regime,
+**Eight detectors** feed it (`analysis/recommender.py`): volatility regime,
 tail event, macro dislocation, pairs opportunity, trend, breakout, relative
-performance.
+performance, vol mispricing.
 
-**Normalisation.** The detectors speak seven different direction vocabularies
-("uptrend", "above_model", "long spread", "compressed"…). A `POLARITY` map
-collapses them onto one bull/bear/neutral axis so they can be compared at all.
-Volatility and tail readings are routed to a **separate risk axis** so a vol
-spike can never fake a directional call. Each signal also carries a
+**Normalisation.** The detectors speak eight different direction vocabularies
+("uptrend", "above_model", "long spread", "compressed", "rich"…). A `POLARITY`
+map collapses them onto one bull/bear/neutral axis so they can be compared at
+all. Volatility and tail readings are routed to a **separate risk axis** so a
+vol spike can never fake a directional call. Vol mispricing is mapped to
+polarity 0 and kept off the risk axis too: expensive option premium is a
+relative-value read, so it reports itself without moving the verdict either way. Each signal also carries a
 `reliability` derived from its own statistics — cointegration p-value, macro
 R², GARCH sample size — never invented.
 
@@ -201,7 +208,7 @@ a segmented meter.
 - **Type & layout.** Archivo (variable) + JetBrains Mono; five sizes replacing
   32 ad-hoc values; bento grids that tile exactly at every breakpoint; signals
   as a hairline list rather than a card grid.
-- **Shared ticker** across all five tabs via context — panels used to hold a
+- **Shared ticker** across all six tabs via context — panels used to hold a
   private `useState("^GSPC")`, so switching tabs reset the asset.
 - **Skeletons** matched to the layout on first load, dim-in-place on refetch;
   a session cache (stale-while-revalidate) removed the jank on tab switches.
@@ -233,9 +240,10 @@ detectors are built but several inferential claims are unvalidated —
 multiple-testing correction on the 990 cointegration tests, HAC/Newey-West
 errors on the autocorrelated monthly regression, differencing the level-valued
 macro series, out-of-sample GARCH VaR with a Kupiec test, and removing
-look-ahead bias from the pair-signal generation. After that: wiring the
-Black–Scholes vol-mispricing detector into the engine, news-on-chart-click, and
-a backtest that turns "opportunities" into measured evidence.
+look-ahead bias from the pair-signal generation. After that: driving the options
+comparison off a GARCH volatility forecast rather than realised σ,
+news-on-chart-click, and a backtest that turns "opportunities" into measured
+evidence.
 
 ---
 

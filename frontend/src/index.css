@@ -839,13 +839,17 @@ body {
 .infotip .infotip-icon { transition: color var(--duration-fast) var(--ease-out); }
 .infotip:hover .infotip-icon, .infotip:focus-visible .infotip-icon { color: var(--accent-primary); }
 
-.infotip-bubble {
-  position: absolute;
-  bottom: calc(100% + 9px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
+/* A popover: the browser paints this in the top layer, so no ancestor overflow
+   can clip it. Tooltip.jsx sets top/left; the UA's default popover box (fixed,
+   inset 0, auto margins, its own border/padding) has to be cleared first. */
+.infotip-bubble,
+.infotip-bubble:popover-open {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  overflow: visible;
   width: max-content;
-  max-width: 240px;
+  max-width: min(240px, calc(100vw - 16px));
   background: var(--bg-elevated);
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
@@ -858,26 +862,37 @@ body {
   text-transform: none;
   letter-spacing: normal;
   font-family: var(--font-main);
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
-  z-index: 200;
   pointer-events: none;
   white-space: normal;
 }
+/* Closed popovers are display:none, so there is no opacity transition to run.
+   Animating the entry only keeps the reveal from snapping. */
+.infotip-bubble:popover-open {
+  animation: infotip-in var(--duration-fast) var(--ease-out);
+}
+@keyframes infotip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .infotip-bubble:popover-open { animation: none; }
+}
+
+/* --arrow-x tracks the icon even when the bubble was clamped off centre. */
 .infotip-bubble::after {
   content: '';
   position: absolute;
-  top: 100%;
-  left: 50%;
+  left: var(--arrow-x, 50%);
   transform: translateX(-50%);
   border: 4px solid transparent;
+}
+.infotip-bubble[data-side="top"]::after {
+  top: 100%;
   border-top-color: var(--bg-elevated);
 }
-.infotip:hover .infotip-bubble, .infotip:focus-visible .infotip-bubble {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
+.infotip-bubble[data-side="bottom"]::after {
+  bottom: 100%;
+  border-bottom-color: var(--bg-elevated);
 }
 
 .label-with-tip { display: inline-flex; align-items: center; gap: 5px; }
@@ -1807,3 +1822,71 @@ html, body { max-width: 100%; overflow-x: hidden; }
   line-height: 1.25;
 }
 .stat-value { overflow-wrap: anywhere; }
+
+/* ============================================================
+   Options panel
+   ============================================================ */
+.section-header .section-ico.options {
+  background: var(--surface-sunk);
+  color: var(--accent-primary);
+}
+
+/* Strike and expiry controls. Sized to sit level with the segmented pills
+   beside them in the same toolbar row. */
+.opt-input,
+.opt-select {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  padding: 5px 12px;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+.opt-input { width: 8.5rem; }
+.opt-input::placeholder { color: var(--ink-muted); }
+.opt-select { cursor: pointer; }
+.opt-input:hover,
+.opt-select:hover { border-color: var(--hairline-strong); }
+.opt-input:focus-visible,
+.opt-select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* The sentence that carries the reading, ahead of the bars that quantify it. */
+.vol-gloss {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 68ch;
+  margin: 0.2rem 0 1.1rem;
+}
+
+.volbars { display: flex; flex-direction: column; gap: 0.7rem; margin-bottom: 1.2rem; }
+.volbar-row { display: grid; grid-template-columns: 8.5rem 1fr 3.5rem; align-items: center; gap: 12px; }
+.volbar-label { font-size: var(--text-xs); color: var(--ink-secondary); white-space: nowrap; }
+.volbar-track {
+  height: 10px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  overflow: hidden;
+}
+/* Length is the comparison; the two fills differ in weight, not hue, so the
+   chart still reads with no colour perception at all. */
+.volbar-fill { height: 100%; border-radius: 999px; }
+.volbar-fill.implied { background: var(--ink); }
+/* --ink-muted, not --hairline-strong: the latter measured 2.3:1 against the
+   track in dark mode, under the 3:1 floor for a graphical element. */
+.volbar-fill.realised { background: var(--ink-muted); }
+.volbar-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink);
+  text-align: right;
+}
+
+@media (max-width: 560px) {
+  .volbar-row { grid-template-columns: 1fr 3.5rem; }
+  .volbar-label { grid-column: 1 / -1; }
+  .opt-input { width: 7.5rem; }
+}

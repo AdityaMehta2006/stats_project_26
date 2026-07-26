@@ -112,6 +112,15 @@ const PATHS = {
       <circle cx="12" cy="12" r="0.6" />
     </>
   ),
+  // Options / contract — a price bracket around a strike
+  contract: (
+    <>
+      <path d="M4 5v14M20 5v14" />
+      <path d="M4 5h3M4 19h3M20 5h-3M20 19h-3" />
+      <path d="M8 12h8" />
+      <circle cx="12" cy="12" r="2.2" />
+    </>
+  ),
   // AI / generate
   sparkles: (
     <>

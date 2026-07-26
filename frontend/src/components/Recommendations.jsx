@@ -200,7 +200,8 @@ export default function Recommendations({ onNavigate, llmAvailable, status }) {
       <header className="panel-head">
         <h1>Opportunities</h1>
         <p>
-          Seven detectors across volatility, macro, forex mean-reversion and price.
+          Eight detectors across volatility, macro, forex mean-reversion, options
+          premium and price.
           Each is weighted by how extreme it is and how far its own statistics justify
           trusting it, then netted into one read.
         </p>

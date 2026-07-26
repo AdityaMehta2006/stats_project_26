@@ -2,8 +2,9 @@
 test_engine.py
 --------------
 Covers the two pieces of engine.py that are pure logic and easy to get subtly
-wrong: the polarity map (which collapses 7 detector vocabularies onto one
-bull/bear axis) and the fusion maths (which replaces the old confidence score).
+wrong: the polarity map (which collapses 8 detector vocabularies onto one
+bull/bear axis), the fusion maths (which replaces the old confidence score), and
+the vol-mispricing detector's dead band.
 
 Run:  pytest test_engine.py        or        python test_engine.py
 """
@@ -55,6 +56,8 @@ ALL_DIRECTIONS = [
     ("breakout", "neutral"),
     ("relative_performance", "outperforming"),
     ("relative_performance", "underperforming"),
+    ("vol_mispricing", "rich"),
+    ("vol_mispricing", "cheap"),
 ]
 
 
@@ -249,6 +252,66 @@ def test_guardrail_flags_invented_numbers():
     scan = {"signals": [{"severity": 0.72, "evidence": {"z_sigma": 2.41}}], "verdict": {}}
     flagged = unverified_numbers("the price target is 4821.55", scan)
     assert "4821.55" in flagged
+
+
+# --------------------------------------------------------------------------
+# Vol-mispricing detector
+# --------------------------------------------------------------------------
+
+def _detect_with_vols(iv, model_vol):
+    """
+    Run the detector against a stubbed option chain. Patched by hand rather than
+    with the monkeypatch fixture, because the __main__ runner below calls every
+    test with no arguments.
+    """
+    from analysis import recommender as rec
+
+    real = rec.analyze_option
+    rec.analyze_option = lambda ticker: {
+        "market": {
+            "market_implied_vol": iv,
+            "model_volatility": model_vol,
+            "expiry_used": "2026-08-21",
+        }
+    }
+    try:
+        return rec.detect_vol_mispricing("TEST")
+    finally:
+        rec.analyze_option = real
+
+
+def test_vol_mispricing_is_silent_inside_the_dead_band():
+    # Implied within ±15% of realised is not worth a signal.
+    assert _detect_with_vols(0.25, 0.24) is None
+    assert _detect_with_vols(0.24, 0.25) is None
+
+
+def test_vol_mispricing_reads_rich_and_cheap():
+    rich = _detect_with_vols(0.40, 0.20)
+    assert rich["direction"] == "rich"
+    assert rich["type"] == "vol_mispricing"
+    assert 0.0 <= rich["severity"] <= 1.0
+    assert rich["evidence"]["iv_ratio"] == 2.0
+
+    cheap = _detect_with_vols(0.10, 0.20)
+    assert cheap["direction"] == "cheap"
+    assert cheap["evidence"]["iv_ratio"] == 0.5
+
+
+def test_vol_mispricing_needs_a_chain():
+    # No chain, or a zero quote, must be silence rather than a divide by zero.
+    assert _detect_with_vols(0.0, 0.24) is None
+    assert _detect_with_vols(0.24, 0.0) is None
+
+
+def test_vol_mispricing_never_moves_the_verdict():
+    # Premium being expensive is not a directional call. It must leave tilt and
+    # the risk axis alone, or the gauge starts lying.
+    signals = [sig("vol_mispricing", "rich", severity=1.0)]
+    v = fuse(signals)
+    assert v["tilt"] == 0.0
+    assert v["risk"] == 0.0
+    assert v["stance"] == "neutral"
 
 
 if __name__ == "__main__":

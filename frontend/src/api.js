@@ -66,6 +66,15 @@ export const getPairsCorrelation = (pairs = null) => {
   return fetchJSON(`/pairs/correlation${q}`);
 };
 
+// Options — Black-Scholes price, Greeks, and implied-vs-realised vol.
+// `strike` blank means at-the-money, `expiry` blank means the ~30-day contract.
+export const getBlackScholes = (ticker = "^GSPC", option = "call", strike = null, expiry = null) =>
+  fetchJSON(
+    `/options/black-scholes?ticker=${encodeURIComponent(ticker)}&option=${option}` +
+      (strike ? `&strike=${strike}` : "") +
+      (expiry ? `&expiry=${expiry}` : "")
+  );
+
 // Decision engine — fused verdict over all three pillars.
 // These sit above the per-pillar endpoints above; they don't replace them.
 export const getLlmInfo = () => fetchJSON("/llm/info");

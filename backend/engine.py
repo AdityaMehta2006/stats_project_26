@@ -7,10 +7,10 @@ above them, normalises what their detectors emit, and fuses it into one view.
 
 Two jobs live here:
 
-  1. **Normalisation.** The seven detectors in recommender.py speak seven
+  1. **Normalisation.** The eight detectors in recommender.py speak eight
      different direction vocabularies ("uptrend", "above_model", "long
-     spread", "compressed"...). POLARITY collapses all of them onto a single
-     bull/bear/neutral axis so they can be compared and netted at all.
+     spread", "compressed", "rich"...). POLARITY collapses all of them onto a
+     single bull/bear/neutral axis so they can be compared and netted at all.
 
   2. **Fusion.** A weighted score that replaces the old confidence line
      (`0.2 + 0.15*len(signals) + 0.3*top_severity`), which was dominated by
@@ -90,6 +90,13 @@ POLARITY = {
 
     ("relative_performance", "outperforming"): +1,
     ("relative_performance", "underperforming"): -1,
+
+    # Expensive or cheap option premium is a relative-value read, not a bull/bear
+    # call — there is no defensible sign for it, so it never moves tilt. It is
+    # also deliberately absent from RISK_TYPES below: rich premium is a statement
+    # about what the market charges for vol, not about realised risk.
+    ("vol_mispricing", "rich"): 0,
+    ("vol_mispricing", "cheap"): 0,
 }
 
 # Types that describe risk rather than direction.
@@ -104,6 +111,7 @@ SOURCE = {
     "trend": "price",
     "breakout": "price",
     "relative_performance": "price",
+    "vol_mispricing": "options",
 }
 
 
@@ -222,6 +230,11 @@ def _reliability(d: dict) -> float:
         # GARCH fits on ~2700 daily observations — well identified.
         return 0.85
 
+    if t == "vol_mispricing":
+        # A live market quote is real, but it is a single quote, and the vol it
+        # is compared against is realised over a different horizon.
+        return 0.6
+
     # Price rules (trend, breakout, relative performance): sound, widely used
     # heuristics, but not inferential tests. Trusted less than a fitted model.
     return 0.65
@@ -330,6 +343,9 @@ def _scan_asset_cached(ticker: str, pairs: tuple, heavy: bool, asof: str) -> dic
         (rec.detect_volatility_regime, (ticker, garch)) if garch else None,
         (rec.detect_tail_event, (ticker, dist)) if dist else None,
         (rec.detect_pairs_opportunity, (pairs, best)) if best else None,
+        # Fetches a live option chain, so it rides with the heavy tier rather
+        # than adding network I/O to every asset in a broad sweep.
+        (rec.detect_vol_mispricing, (ticker,)) if heavy else None,
         (rec.detect_trend, (ticker,)),
         (rec.detect_macro_dislocation, (ticker,)),
         (rec.detect_breakout, (ticker,)),

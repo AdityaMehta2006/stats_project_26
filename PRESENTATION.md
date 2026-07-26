@@ -38,7 +38,7 @@ opportunity signal.
    basis of market-neutral "statistical arbitrage".
 
 4. **Opportunity synthesis (the decision engine).** Combine all the above into
-   one automated scanner that *fuses* what the three pillars detect into a
+   one automated scanner that *fuses* what the four pillars detect into a
    single directional verdict — with agreement, conviction, and disagreement all
    made explicit — and uses a **local AI analyst** to explain it in plain English.
 
@@ -118,7 +118,7 @@ below recomputed 26 July 2026.)*
   mean-reversion half-life of **69 days**, on log prices.
 
 **Decision engine (working — this is the headline advance):**
-- Seven detectors across all three pillars, normalized onto one bull/bear axis,
+- Eight detectors across all four pillars, normalized onto one bull/bear axis,
   then **fused**: weight = severity × statistical reliability, producing a
   direction (`tilt`), a `conviction` that *falls* when signals disagree, and a
   separate risk axis so a volatility spike can't fake a directional call.
@@ -133,8 +133,8 @@ below recomputed 26 July 2026.)*
 - ~4 seconds on the GPU (≈28 tokens/sec), streaming, fully local.
 
 **Dashboard (working):**
-- Any ticker, any forex pairs, time ranges on every chart, five tabs
-  (Overview, Opportunities, Macro, GARCH, Pair Trading), light/dark themes with
+- Any ticker, any forex pairs, time ranges on every chart, six tabs
+  (Overview, Opportunities, Macro, GARCH, Pair Trading, Options), light/dark themes with
   all colour pairings verified at ≥4.5:1 contrast.
 
 **In short:** the pilot confirms the data, the statistics, the fusion layer, the

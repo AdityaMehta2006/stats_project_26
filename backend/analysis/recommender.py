@@ -5,7 +5,8 @@ Anomaly & opportunity recommendation engine.
 
 Principle: STATS DETECT, LLM EXPLAINS. Deterministic detectors run over the
 existing pillars (GARCH volatility, return distribution, forex cointegration,
-price trend, macro dislocation, breakout, relative performance) and emit
+price trend, macro dislocation, breakout, relative performance, options vol
+mispricing) and emit
 structured signals with a 0-1 severity. A rules-based summary is always
 produced; an optional local LLM turns the signals into a plain-English
 analyst note (it is given the numbers and must not invent any).
@@ -19,6 +20,7 @@ from data_loader import get_equity_data, build_equity_returns
 from analysis.garch import fit_garch, get_return_distribution
 from analysis.pairs import get_best_pair_analysis
 from analysis.macro_regression import get_macro_diagnostics
+from analysis.black_scholes import analyze_option, RICH_RATIO, CHEAP_RATIO
 
 import llm_client
 
@@ -380,6 +382,59 @@ def detect_relative_performance(ticker: str) -> dict | None:
             "bench_3m_pct": round(bench_3m, 1),
             "alpha_3m_pct": round(alpha_3m, 1),
             "alpha_percentile": round(pct, 2),
+        },
+    }
+
+
+def detect_vol_mispricing(ticker: str) -> dict | None:
+    """
+    Variance risk premium: the market's implied volatility against our own
+    realised-vol estimate. Rich premium favours selling it, cheap favours
+    buying it — a relative-value read, not a directional call.
+
+    Silent when the ticker has no option chain, which is most of them.
+    """
+    try:
+        opt = analyze_option(ticker)
+    except Exception:
+        return None
+
+    mkt = opt.get("market") or {}
+    iv = float(mkt.get("market_implied_vol") or 0.0)
+    model_vol = float(mkt.get("model_volatility") or 0.0)
+    if iv <= 0 or model_vol <= 0:
+        return None
+
+    ratio = iv / model_vol
+    if CHEAP_RATIO <= ratio <= RICH_RATIO:
+        return None
+
+    if ratio > RICH_RATIO:
+        direction = "rich"
+        severity = _clamp(0.35 + (ratio - RICH_RATIO) / 0.5 * 0.65)
+        label = f"{ticker} options rich — implied vol {ratio:.2f}× realised"
+        recommendation = "sell premium / prefer spreads"
+    else:
+        direction = "cheap"
+        severity = _clamp(0.35 + (CHEAP_RATIO - ratio) / CHEAP_RATIO * 0.65)
+        label = f"{ticker} options cheap — implied vol {ratio:.2f}× realised"
+        recommendation = "buy premium"
+
+    return {
+        "type": "vol_mispricing", "asset": ticker, "direction": direction,
+        "label": label,
+        "severity": severity,
+        "recommendation": recommendation,
+        "note": (
+            f"The {mkt.get('expiry_used')} chain implies {iv*100:.1f}% annualized volatility "
+            f"against {model_vol*100:.1f}% realised over the past year — a ratio of {ratio:.2f}. "
+            f"Option premium looks {direction} relative to how much {ticker} has actually moved."
+        ),
+        "evidence": {
+            "implied_vol_pct": round(iv * 100, 1),
+            "realised_vol_pct": round(model_vol * 100, 1),
+            "iv_ratio": round(ratio, 2),
+            "expiry_used": mkt.get("expiry_used"),
         },
     }
 

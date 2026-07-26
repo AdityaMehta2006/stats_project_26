@@ -75,7 +75,7 @@ Each is another *lens* for spotting opportunity (stats detect, AI explains):
       EV/EBITDA from `yfinance` `Ticker.info`) vs the stock's own history and peers,
       plus a technical stretch check (% above 200-DMA, RSI). Flags "priced for
       perfection" (avoid/short) vs "on sale" (value buy).
-- [ ] **Options vol-mispricing** — implied vol (Black–Scholes, §7) vs GARCH forecast → options rich/cheap.
+- [x] **Options vol-mispricing** — implied vol (Black–Scholes, §7) vs realised σ → options rich/cheap. *(§7; GARCH-forecast σ still open.)*
 - [ ] **Momentum & relative strength** — rank a universe by risk-adjusted 12–1 month momentum.
 - [ ] **Oversold bounce** — distance from 52-week high + RSI → mean-reversion candidates.
 - [ ] **Volatility squeeze** — Bollinger/Keltner compression → breakout setup.
@@ -179,7 +179,7 @@ Current design is a hybrid with a UI toggle: **rules detect, LLM explains**.
 
 ---
 
-## 7. Options pricing — Black–Scholes — mostly done
+## 7. Options pricing — Black–Scholes — done
 
 Adds an options layer that ties directly into the volatility pillar and feeds the recommender.
 - [x] New module `backend/analysis/black_scholes.py`:
@@ -188,14 +188,30 @@ Adds an options layer that ties directly into the volatility pillar and feeds th
     with `d1 = [ln(S/K) + (r + σ²/2)T] / (σ√T)` and `d2 = d1 − σ√T`.
   - Greeks: delta, gamma, vega, theta, rho.
   - Implied-volatility solver (Newton / bisection) from a market option price.
-- [x] Inputs: spot from the ticker, `r` from the 10Y, `σ` from the GARCH forecast
-      or user input (`_risk_free_rate()`, `_model_vol()`, `analyze_option()`).
-- [x] Endpoint `GET /api/options/black-scholes?ticker=&strike=&expiry=`.
-- [ ] **Vol-mispricing detector** for the engine: `analyze_option` already
-      computes a `vol_verdict` (implied vs GARCH-forecast vol) — nothing
-      consumes it yet.
-- [ ] UI card (price, Greeks, implied-vol-vs-GARCH gauge) — no frontend
-      surface for the options endpoint at all right now.
+- [x] Inputs: spot from the ticker, `r` from the 10Y (`_risk_free_rate()`),
+      `σ` from realised returns (`_model_vol()`), or a user-supplied strike/expiry.
+- [x] Endpoint `GET /api/options/black-scholes?ticker=&strike=&expiry=&option=`.
+      Also returns the chain's `expiries`, so the UI dropdown needs no second call.
+- [x] **Vol-mispricing detector** — `detect_vol_mispricing()` in `recommender.py`,
+      wired into `engine.py` as the eighth detector (source `options`,
+      reliability 0.6). Fires outside a 0.85–1.15 implied/realised band
+      (`RICH_RATIO`/`CHEAP_RATIO`, shared with `analyze_option` so the endpoint
+      verdict and the detector cannot disagree). **Polarity 0 by design** and
+      deliberately outside `RISK_TYPES`: expensive premium is a relative-value
+      read, not a bull/bear call, so it never moves `tilt` or the risk axis.
+- [x] UI: **Options tab** (`frontend/src/components/Options.jsx`) — model vs
+      market price, implied-vs-realised vol bars, Greeks, and the pricing inputs.
+      Call/put, strike and expiry are all selectable.
+- [x] Fixed: the market leg solved implied vol at the *requested* horizon while
+      pricing a contract from `expiries[0]`. A 30-day default was being compared
+      to a next-day contract, so `our_implied_vol` came back ~0.04 against a
+      market IV of ~0.24. Now the nearest expiry to the requested horizon is
+      chosen and the solve uses that contract's own `T`.
+- [ ] `σ` from a **GARCH h-step forecast** rather than 1-year realised vol. The
+      §7 text above used to claim this was already done; it was not.
+      `analysis/garch.py` has no forecast function — this needs
+      `arch`'s `res.forecast(horizon=...)` over the option's tenor. Until then
+      every label in the UI reads "Realised σ (1Y)", not "forecast".
 
 ---
 
@@ -378,8 +394,10 @@ inference underneath. Detail in "Still open (next)" at the bottom.
     sample, then generates signals over that same sample — look-ahead bias.
   When these land, q-values and VaR-breach rates display through the existing
   `LabelWithTip` next to the current p-value readouts.
-- Wire `black_scholes.analyze_option` into the engine as a vol-mispricing detector
-  (its `vol_verdict` is computed but nothing consumes it).
+- `detect_vol_mispricing` fetches a live option chain, so it runs on the heavy
+  tier only. Measured cost: **~2.9s** added to a cold `warm()` across the 12-asset
+  universe (6 threads), then cached per trading day. Note `heavy=False` currently
+  has no callers — the guard is there so a future fast sweep skips the network.
 - `/api/recommendations` is now unused by the UI — safe to delete from `main.py`.
 - To start the GPU server: run llama-server.exe with `-ngl 99 --port 8080` (see
   `llm_client.py` header). Currently falling back to the in-process CPU path

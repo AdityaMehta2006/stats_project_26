@@ -47,7 +47,7 @@ apart — history says the gap tends to snap back. This is the basis of
 market-neutral ``statistical arbitrage''.
 
 \item \textbf{Opportunity synthesis (the decision engine).} Combine all of the above
-into one automated scanner that \emph{fuses} what the three pillars detect into a
+into one automated scanner that \emph{fuses} what the four pillars detect into a
 single directional verdict — with agreement, conviction, and disagreement all made
 explicit — and uses a \textbf{local AI analyst} to explain it in plain English.
 
@@ -131,7 +131,7 @@ p ≈ 0 — risk is \emph{not} constant, and the normal curve badly under-states
 with a mean-reversion half-life of \textbf{69 days}, on log prices.
 \end{itemize}
 
-\textbf{Decision engine — the headline advance.} Seven detectors across all three
+\textbf{Decision engine — the headline advance.} Eight detectors across all four
 pillars, normalized onto one bull/bear axis and then \textbf{fused}: weight =
 severity × statistical reliability, producing a direction (\tk{tilt}) and a
 \tk{conviction} that \emph{falls} when signals disagree, with risk on a separate axis
@@ -146,7 +146,8 @@ supplied evidence and anything unmatched is flagged in the UI. ≈4 seconds on t
 (≈28 tokens/sec), streaming, fully local.
 
 \textbf{Dashboard (working).} Any ticker, any forex pairs, time ranges on every chart,
-five tabs (Overview, Opportunities, Macro, GARCH, Pair Trading), light/dark themes
+six tabs (Overview, Opportunities, Macro, GARCH, Pair Trading, Options), light/dark
+themes
 with all colour pairings verified at ≥4.5:1 contrast.
 
 \begin{opp}
@@ -165,8 +166,8 @@ an out-of-sample check on the signals. That is the next block of work.
 \item \tk{analysis/macro\_regression.py} — Pillar 1: OLS lag regression, Granger causality, correlation
 \item \tk{analysis/garch.py} — Pillar 2: GARCH(1,1), volatility clustering, return distribution
 \item \tk{analysis/pairs.py} — Pillar 3: cointegration, spread / z-score, trading signals
-\item \tk{analysis/recommender.py} — the seven detectors over the pillar outputs
-\item \tk{analysis/black\_scholes.py} — option pricing, Greeks, implied-volatility solver
+\item \tk{analysis/recommender.py} — the eight detectors over the pillar outputs
+\item \tk{analysis/black\_scholes.py} — Pillar 4: option pricing, Greeks, implied-volatility solver
 \item \tk{engine.py} — the decision engine: polarity normalisation, reliability
 weighting, fusion, the tiered/cached scan, and streaming narration
 \item \tk{llm\_client.py} — provider-agnostic local-LLM client (GPU server + CPU fallback)
@@ -177,7 +178,7 @@ reliability, stance parsing, and the number guardrail
 
 \subsection*{Frontend (React + Vite)}
 \begin{itemize}
-\item Five tab panels — Overview, Opportunities, Macro Regression, GARCH Volatility, Pair Trading
+\item Six tab panels — Overview, Opportunities, Macro Regression, GARCH Volatility, Pair Trading, Options
 \item Shared components — SVG icon set, info-tooltips, time-range filter, ticker
 search, forex selector, status states, tilt gauge, skeletons
 \item Support — design tokens, light/dark theme hook, shared ticker context,
@@ -188,13 +189,14 @@ SSE narration hook, number formatting, data-fetch hook with abort + session cach
 Each future module is another \emph{lens} for spotting opportunity. The engine's
 principle stays the same: \textbf{statistics detect, the AI explains}.
 
-\subsection*{1. Options \& Black–Scholes \quad{\normalfont\small(module built; detector not yet wired)}}
+\subsection*{1. Options \& Black–Scholes \quad{\normalfont\small(delivered; volatility forecast still open)}}
 Price European call / put options and their Greeks, and back out the market's
-\textbf{implied volatility}. The module and its endpoint exist and already compute a
-verdict; what remains is feeding that verdict into the engine as a signal.
-\textbf{Opportunity:} compare implied volatility with our GARCH forecast — when the
-market pays far more (or less) for risk than the model expects, options are ``rich''
-or ``cheap''.
+\textbf{implied volatility}. Now shipped end to end: the \textbf{Options} tab prices
+any contract on a chosen strike and expiry, and \tk{detect\_vol\_mispricing} feeds the
+engine as its eighth detector. \textbf{Opportunity:} when the market pays far more (or
+less) for risk than the asset has actually delivered, options are ``rich'' or
+``cheap''. \emph{Remaining:} the comparison currently uses 1-year realised volatility;
+driving it off a GARCH forecast over the option's own tenor is the open piece.
 
 \subsection*{2. Valuation — ``is the stock bloated / overpriced?''}
 Pull fundamental ratios (P/E, P/B, P/S, PEG, EV/EBITDA) and compare them with the

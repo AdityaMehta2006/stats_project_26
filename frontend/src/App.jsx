@@ -5,6 +5,7 @@ import Dashboard from "./components/Dashboard";
 import MacroRegression from "./components/MacroRegression";
 import GarchVolatility from "./components/GarchVolatility";
 import PairTrading from "./components/PairTrading";
+import Options from "./components/Options";
 import Recommendations from "./components/Recommendations";
 import Icon from "./components/common/Icon";
 import BgPattern from "./components/common/BgPattern";
@@ -37,6 +38,7 @@ const TABS = [
   { id: "macro",         label: "Macro",           icon: "trendingUp" },
   { id: "garch",         label: "GARCH",           icon: "activity" },
   { id: "pairs",         label: "Pairs",           icon: "exchange" },
+  { id: "options",       label: "Options",         icon: "contract" },
 ];
 
 /**
@@ -92,6 +94,7 @@ function Shell() {
       case "macro":  return <MacroRegression />;
       case "garch":  return <GarchVolatility />;
       case "pairs":  return <PairTrading />;
+      case "options": return <Options />;
       default:       return <Dashboard onNavigate={setActiveTab} />;
     }
   };
