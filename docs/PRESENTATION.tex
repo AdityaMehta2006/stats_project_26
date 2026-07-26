@@ -46,10 +46,10 @@ tethered over the long run (cointegration), then flag when they drift unusually 
 apart — history says the gap tends to snap back. This is the basis of
 market-neutral ``statistical arbitrage''.
 
-\item \textbf{Opportunity synthesis (the recommendation engine).} Combine all of the
-above into one automated scanner that ranks what is unusual or actionable
-\emph{right now}, and uses a \textbf{local AI analyst} to explain each finding in
-plain English.
+\item \textbf{Opportunity synthesis (the decision engine).} Combine all of the above
+into one automated scanner that \emph{fuses} what the four pillars detect into a
+single directional verdict — with agreement, conviction, and disagreement all made
+explicit — and uses a \textbf{local AI analyst} to explain it in plain English.
 
 \item \textbf{Accessibility \& robustness.} Make it work for \emph{any} ticker the
 user types, on a reliable data pipeline, presented through a clear, interactive
@@ -93,7 +93,9 @@ Turns raw data into results:
 \item \tk{/api/macro-regression/*} — regression, Granger-causality, correlation, time series
 \item \tk{/api/garch/*} — volatility model, clustering tests, return distribution
 \item \tk{/api/pairs/*} — cointegration tests, best-pair spread \& signals, correlation
-\item \tk{/api/recommendations} — the ranked opportunity scan
+\item \tk{/api/options/black-scholes} — option price, Greeks, implied volatility
+\item \tk{/api/engine/\{feed,asset,narrate,status\}} — the fused opportunity scan, the
+streaming AI narration, and the engine's health
 \item \tk{/api/llm/info} — status of the local AI analyst
 \end{itemize}
 
@@ -103,40 +105,57 @@ model on our \textbf{NVIDIA RTX 4050 GPU}, used to explain detected opportunitie
 plain language. No data leaves the machine.
 
 \section{Pilot Study Conducted to Date}
-We have a \textbf{working end-to-end prototype}, validated on real data.
+We have a \textbf{working end-to-end prototype}, validated on real data. \emph{All
+figures below were recomputed on 26 July 2026.}
 
 \begin{keybox}
-\textbf{Data pipeline (validated).} Live downloads work for all sources; a corrupted
-early cache (the volatility and oil series had been mixed up) was found and fixed.
-Every series now sits in its correct real-world range — e.g. VIX 9--83, oil $-37$ to
-124, 10-year yield 0.5--4.9\%.
+\textbf{Data pipeline — and one real finding.} We had been treating a data corruption
+as a bad cache. The actual root cause is that \textbf{\tk{yfinance} is not
+thread-safe}: concurrent downloads silently return one ticker's data under another's
+name. A deliberately threaded scan reproduced it on demand — three separate ticker
+pairs came back byte-identical. Downloads are now serialized. Separately, the data
+end-date had been frozen, so the dashboard was reasoning over seven-month-old prices;
+now a rolling window with a staleness check.
 \end{keybox}
 
 \textbf{Three analysis pillars — working, with sample findings on the S\&P 500:}
 \begin{itemize}
-\item \emph{Macro:} macro factors explain about \textbf{64\%} of monthly return
-variation (R² ≈ 0.64); the model surfaces which factors are significant and at what lag.
-\item \emph{Volatility:} GARCH ``persistence'' ≈ \textbf{0.9955} (shocks fade very
-slowly) and excess kurtosis ≈ \textbf{16} (strong fat tails) — risk is \emph{not}
-constant and crashes are under-estimated by the normal curve.
-\item \emph{Pairs:} among major forex pairs, \textbf{USDCHF/USDJPY} tested
-cointegrated (p ≈ 0.008) with a mean-reversion half-life around 64 days.
+\item \emph{Macro:} standardized macro factors explain about \textbf{69\%} of monthly
+return variation (R² = 0.687, adj.\ 0.585); Granger causality runs 32 tests,
+\textbf{6 significant}. Coefficients are standardized betas, so ``which driver matters
+most'' is a fair comparison.
+\item \emph{Volatility:} GARCH persistence ≈ \textbf{0.994} over 2{,}905 days (shocks
+fade very slowly); excess kurtosis ≈ \textbf{15.8}, skew \textbf{−0.65}, Jarque-Bera
+p ≈ 0 — risk is \emph{not} constant, and the normal curve badly under-states crashes.
+\item \emph{Pairs:} \textbf{USDCHF/USDJPY} tested cointegrated (p = \textbf{0.0075})
+with a mean-reversion half-life of \textbf{69 days}, on log prices.
 \end{itemize}
 
-\textbf{Recommendation engine (v1 working).} Four detectors (volatility regime, tail
-move, trend, forex mean-reversion) rank opportunities by severity and assign a
-confidence score. The local AI produces a grounded plain-English note in
-≈4 seconds on the GPU (≈28 tokens/sec), citing only the real detected numbers.
+\textbf{Decision engine — the headline advance.} Eight detectors across all four
+pillars, normalized onto one bull/bear axis and then \textbf{fused}: weight =
+severity × statistical reliability, producing a direction (\tk{tilt}) and a
+\tk{conviction} that \emph{falls} when signals disagree, with risk on a separate axis
+so a volatility spike cannot fake a directional call. Signals that oppose the verdict
+are shown, not averaged away. Warm response: \textbf{11\,ms} for the cross-asset feed,
+\textbf{4.5\,ms} per asset.
 
-\textbf{Dashboard (working).} Interactive web app: search any ticker, pick forex
-pairs, switch time ranges, and read explained results across five tabs (Overview,
-Opportunities, Macro, GARCH, Pair Trading).
+\textbf{The AI layer, kept honest.} The model is handed the computed numbers and
+explains them; it never computes. Its own stance renders \emph{beside} the computed
+one, so a disagreement is visible. Every figure in its note is checked against the
+supplied evidence and anything unmatched is flagged in the UI. ≈4 seconds on the GPU
+(≈28 tokens/sec), streaming, fully local.
+
+\textbf{Dashboard (working).} Any ticker, any forex pairs, time ranges on every chart,
+six tabs (Overview, Opportunities, Macro, GARCH, Pair Trading, Options), light/dark
+themes
+with all colour pairings verified at ≥4.5:1 contrast.
 
 \begin{opp}
-\textbf{In short:} the pilot confirms the data, the statistics, the AI-explanation
-layer, and the user interface all work together on live markets. Next steps
-(standardised comparisons, an options / Black–Scholes module, and a back-test of the
-signals) are tracked in the project roadmap.
+\textbf{In short:} the pilot confirms the data, the statistics, the fusion layer, the
+AI explanation, and the interface all work together on live markets. The honest
+remaining gap is \textbf{inferential rigor} — multiple-testing correction on the 990
+cointegration tests, HAC standard errors on the autocorrelated monthly regression, and
+an out-of-sample check on the signals. That is the next block of work.
 \end{opp}
 
 \section{Modules Built So Far}
@@ -147,27 +166,37 @@ signals) are tracked in the project roadmap.
 \item \tk{analysis/macro\_regression.py} — Pillar 1: OLS lag regression, Granger causality, correlation
 \item \tk{analysis/garch.py} — Pillar 2: GARCH(1,1), volatility clustering, return distribution
 \item \tk{analysis/pairs.py} — Pillar 3: cointegration, spread / z-score, trading signals
-\item \tk{analysis/recommender.py} — the opportunity engine: detectors, ranking, confidence
+\item \tk{analysis/recommender.py} — the eight detectors over the pillar outputs
+\item \tk{analysis/black\_scholes.py} — Pillar 4: option pricing, Greeks, implied-volatility solver
+\item \tk{engine.py} — the decision engine: polarity normalisation, reliability
+weighting, fusion, the tiered/cached scan, and streaming narration
 \item \tk{llm\_client.py} — provider-agnostic local-LLM client (GPU server + CPU fallback)
 \item \tk{main.py} — FastAPI endpoints tying it all together
+\item \tk{test\_engine.py} — 25 tests over polarity, fusion invariants, ranking,
+reliability, stance parsing, and the number guardrail
 \end{itemize}
 
 \subsection*{Frontend (React + Vite)}
 \begin{itemize}
-\item Five tab panels — Overview, Opportunities, Macro Regression, GARCH Volatility, Pair Trading
-\item Shared components — SVG icon set, info-tooltips, time-range filter, ticker search, forex selector, status states, animated background
-\item Support — chart theme, time-range utilities, data-fetch hook, API client
+\item Six tab panels — Overview, Opportunities, Macro Regression, GARCH Volatility, Pair Trading, Options
+\item Shared components — SVG icon set, info-tooltips, time-range filter, ticker
+search, forex selector, status states, tilt gauge, skeletons
+\item Support — design tokens, light/dark theme hook, shared ticker context,
+SSE narration hook, number formatting, data-fetch hook with abort + session cache
 \end{itemize}
 
 \section{Future Plans — Expanding the Opportunity Engine}
 Each future module is another \emph{lens} for spotting opportunity. The engine's
 principle stays the same: \textbf{statistics detect, the AI explains}.
 
-\subsection*{1. Options \& Black–Scholes}
+\subsection*{1. Options \& Black–Scholes \quad{\normalfont\small(delivered; volatility forecast still open)}}
 Price European call / put options and their Greeks, and back out the market's
-\textbf{implied volatility}. \textbf{Opportunity:} compare implied volatility with
-our GARCH forecast — when the market pays far more (or less) for risk than the model
-expects, options are ``rich'' or ``cheap''.
+\textbf{implied volatility}. Now shipped end to end: the \textbf{Options} tab prices
+any contract on a chosen strike and expiry, and \tk{detect\_vol\_mispricing} feeds the
+engine as its eighth detector. \textbf{Opportunity:} when the market pays far more (or
+less) for risk than the asset has actually delivered, options are ``rich'' or
+``cheap''. \emph{Remaining:} the comparison currently uses 1-year realised volatility;
+driving it off a GARCH forecast over the option's own tenor is the open piece.
 
 \subsection*{2. Valuation — ``is the stock bloated / overpriced?''}
 Pull fundamental ratios (P/E, P/B, P/S, PEG, EV/EBITDA) and compare them with the
@@ -193,8 +222,10 @@ style documented anomalies.
 \end{itemize}
 
 \section{Decision Engine: Rules-based vs LLM-based}
-We support \textbf{both}, and today combine them: \emph{rules detect, the LLM
-explains}. A toggle lets the user choose the mode; pure rules is the safe default.
+We combine them: \emph{rules decide, the LLM explains}. Rules alone is the default and
+works with no model running. Where the two meet, the design keeps the seam visible —
+the model's stance renders beside the computed stance so it may disagree openly, and
+every figure it writes is checked against the evidence it was given.
 
 \begin{table}[h]
 \renewcommand{\arraystretch}{1.3}

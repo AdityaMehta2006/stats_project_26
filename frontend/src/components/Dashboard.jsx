@@ -1,45 +1,37 @@
 import { motion } from "framer-motion";
 import Icon from "./common/Icon";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.09 } },
-};
-const item = {
-  hidden: { opacity: 0, y: 18 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.44, ease: "easeOut" } },
-};
+/**
+ * Overview as one bento grid: the five pillars, the scale of the data, and what
+ * the app can be pointed at, all on a single set of hairlines. Cells vary in
+ * span so the grid carries hierarchy on its own — no floating cards, no
+ * nesting, no shadows.
+ */
 
 const PILLARS = [
   {
     id: "macro",
     icon: "trendingUp",
-    iconClass: "macro",
     title: "Macro Factor & Lag Regression",
     description:
-      "Measures how macroeconomic forces — interest rates, inflation, the VIX, oil, gold and the dollar — move equity returns, and with what time delay. Uses OLS regression with lags and Granger-causality tests.",
-    tags: ["OLS Regression", "Granger Causality", "Lagged Correlation"],
-    nav: "macro",
+      "How macroeconomic forces — rates, inflation, the VIX, oil, gold, the dollar — move equity returns, and with what delay. OLS with lags, plus Granger causality.",
+    tags: ["OLS", "Granger", "Lagged correlation"],
   },
   {
     id: "garch",
     icon: "activity",
-    iconClass: "garch",
     title: "GARCH & Volatility Clustering",
     description:
-      "Models how risk itself changes over time. Fits a GARCH(1,1) model to capture volatility clustering (calm and turbulent regimes) and tests whether returns have the fat tails that a normal distribution misses.",
-    tags: ["GARCH(1,1)", "Volatility Clustering", "Fat Tails"],
-    nav: "garch",
+      "How risk itself changes over time. A GARCH(1,1) fit captures calm and turbulent regimes, and tests whether returns carry the fat tails a normal distribution misses.",
+    tags: ["GARCH(1,1)", "Clustering", "Fat tails"],
   },
   {
     id: "pairs",
     icon: "exchange",
-    iconClass: "pairs",
     title: "Forex Pair Trading",
     description:
-      "Finds currency pairs whose prices move together long-term (cointegration), builds a mean-reverting spread, and generates z-score entry/exit signals — the basis of a statistical-arbitrage strategy.",
-    tags: ["Cointegration", "Z-Score", "Mean Reversion"],
-    nav: "pairs",
+      "Currency pairs whose prices stay tethered over the long run. Builds the mean-reverting spread and generates z-score entries — statistical arbitrage in miniature.",
+    tags: ["Cointegration", "Z-score", "Mean reversion"],
   },
   {
     id: "options",
@@ -47,7 +39,7 @@ const PILLARS = [
     iconClass: "options",
     title: "Options Pricing & Volatility Surface",
     description:
-      "Prices options with Black-Scholes, Merton jump-diffusion and Heston stochastic volatility using live market inputs — including a GARCH volatility forecast. Shows why Black-Scholes implies a flat volatility curve while real markets are skewed.",
+      "Prices options with Black-Scholes, Merton jump-diffusion and Heston stochastic volatility. The Options tab reads a live chain for Greeks and implied-versus-realised vol; the Pricing tab drives the same models on parameters you set, showing why Black-Scholes implies a flat volatility curve while real markets are skewed.",
     tags: ["Black-Scholes", "Greeks", "Volatility Smile", "Implied Vol"],
     nav: "options",
   },
@@ -63,95 +55,75 @@ const PILLARS = [
   },
 ];
 
-const HERO_STATS = [
-  { value: "5", label: "Analysis Pillars" },
-  { value: "13", label: "Signal Detectors" },
-  { value: "40+", label: "FX Pairs" },
-  { value: "10Y", label: "Daily History" },
+const SCALE = [
+  { value: "5", label: "Analysis pillars" },
+  { value: "13", label: "Detectors" },
+  { value: "40+", label: "FX pairs" },
+  { value: "10Y", label: "Daily history" },
 ];
 
-const FEATURES = [
-  { label: "Any Ticker",  icon: "search",   desc: "Stocks, indices, crypto" },
-  { label: "Live Data",   icon: "database", desc: "Yahoo Finance + FRED" },
-  { label: "10Y History", icon: "calendar", desc: "2015 – 2025 daily" },
-  { label: "40+ FX Pairs",icon: "globe",    desc: "Any combination" },
+const SOURCES = [
+  { label: "Any ticker", icon: "search", desc: "Stocks, indices, crypto, futures" },
+  { label: "Live data", icon: "database", desc: "Yahoo Finance + FRED" },
+  { label: "Local model", icon: "sparkles", desc: "Explains, never computes" },
 ];
 
 export default function Dashboard({ onNavigate }) {
   return (
-    <motion.div variants={container} initial="hidden" animate="show">
-      {/* Hero */}
-      <motion.div className="dashboard-hero" variants={item}>
-        <div className="hero-eyebrow">
-          <Icon name="activity" size={12} /> Quantitative Research Dashboard
-        </div>
-        <h1>
-          Quantitative Anomalies in{" "}
-          <span className="accent">Financial Markets</span>
-        </h1>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.25 }}
+    >
+      <header className="panel-head">
+        <h1>Quantitative anomalies in financial markets</h1>
         <p>
-          A statistical study of volatility, factor risk, and lagged
-          transmission across equity and forex markets — three classic effects
-          that break the assumptions of textbook finance, modelled live with
-          Python and visualised in React.
+          Five classic effects that break the assumptions of textbook finance —
+          modelled live in Python, fused into one read, and explained in plain
+          English by a local model.
         </p>
+      </header>
 
-        <div className="hero-stats">
-          {HERO_STATS.map((s) => (
-            <div key={s.label} className="hero-stat">
-              <div className="hero-stat-value">{s.value}</div>
-              <div className="hero-stat-label">{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* Pillar Cards */}
-      <motion.div className="pillar-cards" variants={item}>
-        {PILLARS.map((pillar) => (
-          <motion.div
-            key={pillar.id}
-            className="pillar-card"
-            variants={item}
-            whileHover={{ scale: 1.005 }}
-            whileTap={{ scale: 0.995 }}
-            onClick={() => onNavigate(pillar.nav)}
+      <div className="bento">
+        {PILLARS.map((p) => (
+          <button
+            key={p.id}
+            className="bento-cell pillar interactive"
+            onClick={() => onNavigate(p.id)}
           >
-            <div className="pillar-card-inner">
-              <div className={`pillar-icon ${pillar.iconClass}`}>
-                <Icon name={pillar.icon} size={22} strokeWidth={1.7} />
-              </div>
-              <h3>
-                {pillar.title}
-                <Icon name="arrowRight" size={17} className="go-arrow" />
-              </h3>
-              <p>{pillar.description}</p>
-              <div className="pillar-tags">
-                {pillar.tags.map((tag) => (
-                  <span key={tag} className="pillar-tag">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </motion.div>
+            <span className="bento-ico">
+              <Icon name={p.icon} size={18} strokeWidth={1.7} />
+            </span>
+            <h2 className="bento-title">
+              {p.title}
+              <Icon name="arrowRight" size={15} className="go-arrow" />
+            </h2>
+            <p className="bento-text">{p.description}</p>
+            <span className="bento-tags">
+              {p.tags.map((t) => (
+                <span key={t} className="evidence-chip">{t}</span>
+              ))}
+            </span>
+          </button>
         ))}
-      </motion.div>
 
-      {/* Feature Strip */}
-      <motion.div className="feature-strip" variants={item}>
-        {FEATURES.map((f) => (
-          <div key={f.label} className="feature-item">
-            <div className="feature-ico">
-              <Icon name={f.icon} size={17} />
-            </div>
-            <div>
-              <div className="feature-label">{f.label}</div>
-              <div className="feature-desc">{f.desc}</div>
-            </div>
+        {SCALE.map((s) => (
+          <div key={s.label} className="bento-cell metric">
+            <span className="bento-figure">{s.value}</span>
+            <span className="micro-label">{s.label}</span>
           </div>
         ))}
-      </motion.div>
+
+        {SOURCES.map((f) => (
+          <div key={f.label} className="bento-cell source">
+            <span className="bento-ico">
+              <Icon name={f.icon} size={16} />
+            </span>
+            <span className="bento-label">{f.label}</span>
+            <span className="micro-label">{f.desc}</span>
+          </div>
+        ))}
+      </div>
     </motion.div>
   );
 }

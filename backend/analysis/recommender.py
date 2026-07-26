@@ -39,6 +39,7 @@ from analysis.garch import fit_garch, get_return_distribution
 from analysis.pairs import get_best_pair_analysis
 from analysis.macro_regression import get_macro_diagnostics
 from analysis.decision import decide
+from analysis.black_scholes import RICH_RATIO, CHEAP_RATIO
 
 import llm_client
 
@@ -698,10 +699,10 @@ def detect_options_mispricing(ticker: str) -> dict | None:
     vrp = cmp_.get("variance_risk_premium_pct")
     if ratio is None or vrp is None:
         return None
-    if 0.85 <= ratio <= 1.15:
+    if CHEAP_RATIO <= ratio <= RICH_RATIO:
         return None
 
-    rich = ratio > 1.15
+    rich = ratio > RICH_RATIO
     direction = "rich" if rich else "cheap"
     return {
         "type": "options_mispricing", "asset": ticker, "direction": direction,

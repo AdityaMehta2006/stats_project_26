@@ -37,9 +37,10 @@ opportunity signal.
    unusually far apart — history says the gap tends to snap back. This is the
    basis of market-neutral "statistical arbitrage".
 
-4. **Opportunity synthesis (the recommendation engine).** Combine all the above
-   into one automated scanner that ranks what is unusual or actionable *right
-   now*, and uses a **local AI analyst** to explain each finding in plain English.
+4. **Opportunity synthesis (the decision engine).** Combine all the above into
+   one automated scanner that *fuses* what the four pillars detect into a
+   single directional verdict — with agreement, conviction, and disagreement all
+   made explicit — and uses a **local AI analyst** to explain it in plain English.
 
 5. **Accessibility & robustness.** Make it work for *any* ticker the user types,
    on a reliable data pipeline, presented through a clear, interactive dashboard.
@@ -80,7 +81,9 @@ financial-data APIs, and our "sample" is the live market history they return.)*
 - `/api/macro-regression/*` — regression, Granger-causality, correlation, time series
 - `/api/garch/*` — volatility model, clustering tests, return distribution
 - `/api/pairs/*` — cointegration tests, best-pair spread & signals, correlation
-- `/api/recommendations` — the ranked opportunity scan
+- `/api/options/black-scholes` — option price, Greeks, implied vol
+- `/api/engine/{feed,asset,narrate,status}` — the fused opportunity scan, the
+  streaming AI narration, and the engine's health
 - `/api/llm/info` — status of the local AI analyst
 
 **C. Local AI API** — an on-device `llama.cpp` server (OpenAI-compatible) running
@@ -91,37 +94,55 @@ detected opportunities in plain language. No data leaves the machine.
 
 ## 5. Pilot Study Conducted to Date
 
-We have a **working end-to-end prototype** and have validated it on real data.
+We have a **working end-to-end prototype** validated on real data. *(All figures
+below recomputed 26 July 2026.)*
 
-**Data pipeline (validated):**
-- Live downloads working for all sources; a corrupted early cache (the volatility
-  and oil series had been mixed up) was found and fixed. Every series now sits in
-  its correct real-world range (e.g. VIX 9–83, oil −37 to 124, 10-yr yield 0.5–4.9%).
+**Data pipeline (validated, and one real finding):**
+- We had been treating a data corruption as a bad cache. The actual root cause
+  is that **`yfinance` is not thread-safe** — concurrent downloads silently
+  return one ticker's data under another's name. A threaded scan reproduced it
+  on demand (three pairs of tickers came back byte-identical). Downloads are now
+  serialized. This is a genuine data-validation lesson, not just a bug fix.
+- Separately, the data end-date had been frozen, so the dashboard was reasoning
+  over seven-month-old prices. Now a rolling window with a staleness check.
 
-**Three analysis pillars (working, with sample findings on the S&P 500):**
-- *Macro:* macro factors explain about **64%** of monthly return variation (R²≈0.64);
-  the model surfaces which factors are statistically significant and at what lag.
-- *Volatility:* GARCH "persistence" ≈ **0.9955** (shocks fade very slowly) and
-  excess kurtosis ≈ **16** (strong fat tails) — both confirm risk is *not* constant
-  and crashes are under-estimated by the normal curve.
-- *Pairs:* among major forex pairs, **USDCHF/USDJPY** tested cointegrated
-  (p ≈ 0.008) with a mean-reversion half-life around 64 days.
+**Three analysis pillars (working, sample findings on the S&P 500):**
+- *Macro:* standardized macro factors explain about **69%** of monthly return
+  variation (R² = 0.687, adj. 0.585); Granger causality runs 32 tests, **6
+  significant**. Coefficients are standardized betas, so "which driver matters
+  most" is a fair comparison.
+- *Volatility:* GARCH persistence ≈ **0.994** over 2,905 days (shocks fade very
+  slowly); excess kurtosis ≈ **15.8**, skew **−0.65**, Jarque-Bera p ≈ 0 — risk
+  is *not* constant, and the normal curve badly under-states crashes.
+- *Pairs:* **USDCHF/USDJPY** tested cointegrated (p = **0.0075**) with a
+  mean-reversion half-life of **69 days**, on log prices.
 
-**Recommendation engine (v1 working):**
-- Four detectors (volatility regime, tail move, trend, forex mean-reversion) rank
-  opportunities by severity and assign a confidence score.
-- The local AI produces a grounded plain-English note in **~4 seconds on the GPU**
-  (≈28 tokens/sec), citing only the real detected numbers.
+**Decision engine (working — this is the headline advance):**
+- Eight detectors across all four pillars, normalized onto one bull/bear axis,
+  then **fused**: weight = severity × statistical reliability, producing a
+  direction (`tilt`), a `conviction` that *falls* when signals disagree, and a
+  separate risk axis so a volatility spike can't fake a directional call.
+- Signals that oppose the verdict are shown, not averaged away.
+- Warm response: **11 ms** for the cross-asset feed, **4.5 ms** per asset.
+
+**The AI layer, kept honest:**
+- The model is handed the computed numbers and explains them; it never computes.
+  Its own stance renders *beside* the computed one, so a disagreement is
+  visible. Every figure in its note is checked against the supplied evidence and
+  anything unmatched is flagged in the UI.
+- ~4 seconds on the GPU (≈28 tokens/sec), streaming, fully local.
 
 **Dashboard (working):**
-- Interactive web app: search any ticker, pick forex pairs, switch time ranges,
-  and read explained results across five tabs (Overview, Opportunities, Macro,
-  GARCH, Pair Trading).
+- Any ticker, any forex pairs, time ranges on every chart, six tabs
+  (Overview, Opportunities, Macro, GARCH, Pair Trading, Options), light/dark themes with
+  all colour pairings verified at ≥4.5:1 contrast.
 
-**In short:** the "pilot" confirms the data, the statistics, the AI explanation
-layer, and the user interface all work together on live markets. Next steps
-(standardised comparisons, an options/Black–Scholes module, a back-test of the
-signals) are tracked in `TODO.md`.
+**In short:** the pilot confirms the data, the statistics, the fusion layer, the
+AI explanation, and the interface all work together on live markets. The honest
+remaining gap is **inferential rigor** — multiple-testing correction on the 990
+cointegration tests, HAC standard errors on the autocorrelated monthly
+regression, and an out-of-sample check on the signals. That is the next block of
+work, tracked in `TODO.md`.
 
 ---
 

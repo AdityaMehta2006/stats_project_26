@@ -14,6 +14,9 @@ The raw factor levels are kept separate (for time-series plotting) so
 that the user always sees real values in charts.
 """
 
+import io
+import contextlib
+
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.stattools import grangercausalitytests
@@ -207,7 +210,9 @@ def run_granger_causality(ticker: str = "^GSPC", max_lag: int = 4) -> dict:
     Uses raw (non-standardized) factor values — Granger tests are invariant
     to monotone rescaling so z-scoring wouldn't change the result.
     """
-    df = build_macro_dataset(ticker)
+    # copy(): build_macro_dataset is memoized, so the frame is shared — the
+    # VIX rewrite below would otherwise corrupt it for every other caller.
+    df = build_macro_dataset(ticker).copy()
     target = "Equity_Return"
 
     # VIX: log-change for stationarity
@@ -223,7 +228,12 @@ def run_granger_causality(ticker: str = "^GSPC", max_lag: int = 4) -> dict:
         if len(subset) < max_lag + 10:
             continue
         try:
-            gc = grangercausalitytests(subset, maxlag=max_lag, verbose=False)
+            # No verbose= kwarg: removed in statsmodels 0.14. Passing it raised
+            # a TypeError that the except below swallowed, so this whole
+            # function silently returned zero results. Without it the function
+            # dumps a test block per lag to stdout, hence redirect_stdout.
+            with contextlib.redirect_stdout(io.StringIO()):
+                gc = grangercausalitytests(subset, maxlag=max_lag)
             for lag in range(1, max_lag + 1):
                 f_test = gc[lag][0]["ssr_ftest"]
                 results.append({

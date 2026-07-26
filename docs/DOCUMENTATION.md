@@ -184,6 +184,78 @@ unchanged whether or not a model is available.
 
 ---
 
+## 5b. The Fusion Engine — `backend/engine.py`
+
+`decision.py` above answers "what stance, and what size". This layer answers
+"where does the evidence point, how firmly, and how fast can we say so" — it is
+what drives the verdict gauge and the streamed narration. Both read the same
+detections, so they cannot disagree about the inputs. The pillars are untouched
+and still individually callable.
+
+**Eight of the thirteen detectors** feed it (`analysis/recommender.py`):
+volatility regime, tail event, macro dislocation, pairs opportunity, trend,
+breakout, relative performance, options mispricing. The remainder run in the
+`/api/recommendations` path.
+
+**Normalisation.** The detectors speak eight different direction vocabularies
+("uptrend", "above_model", "long spread", "compressed", "rich"…). A `POLARITY`
+map collapses them onto one bull/bear/neutral axis so they can be compared at
+all. Volatility and tail readings are routed to a **separate risk axis** so a
+vol spike can never fake a directional call. Vol mispricing is mapped to
+polarity 0 and kept off the risk axis too: expensive option premium is a
+relative-value read, so it reports itself without moving the verdict either way. Each signal also carries a
+`reliability` derived from its own statistics — cointegration p-value, macro
+R², GARCH sample size — never invented.
+
+**Fusion.** Weight `w = severity × reliability`, then:
+
+```
+tilt        = (bull − bear) / (bull + bear)      direction, −1..+1
+agreement   = 1 − min(bull,bear)/max(bull,bear)  how one-sided
+mass        = 1 − exp(−total / 2)                saturating evidence weight
+conviction  = mass × (0.4 + 0.6 × agreement)
+```
+
+Strength beats count, nothing pins to 1.0 on noise, and a signal pointing the
+other way actively *lowers* conviction. This replaced an earlier
+`0.2 + 0.15·n + 0.3·top` line that was dominated by signal count and clamped
+to 1.0 the moment six of anything showed up.
+
+**Tiered scan.** Price detectors run broad and cheap; one cointegration sweep
+serves the whole FX basket; GARCH is cached on `(ticker, last_data_date)` so
+it refits once per trading day regardless of request volume. A detector that
+fails is recorded in `diagnostics`, never raised — one dead factor costs one
+signal, not the verdict. Measured warm: feed **11 ms**, per-asset **4.5 ms**,
+off-universe cold **0.9 s**.
+
+**Endpoints:** `/api/engine/{feed,asset,narrate,status}`, alongside the
+unchanged per-pillar routes used for drill-down.
+
+---
+
+### The AI layer — "stats detect, the LLM explains"
+
+The model receives the computed detections as compact JSON and is instructed
+to use only those numbers. It never feeds back into the fusion. Three things
+make that verifiable rather than merely asserted:
+
+- **Stance-first streaming.** The prompt demands a `STANCE:` line before the
+  prose, so the model's labelled opinion lands after ~10 tokens and the
+  reasoning streams beneath it instead of blocking for ~20 s.
+- **The model may disagree.** Its stance renders *beside* the computed stance,
+  so a divergence is visible rather than hidden.
+- **A number guardrail.** `unverified_numbers()` checks every figure in the
+  narrative against the evidence supplied; anything unmatched surfaces in the
+  UI as a grounding badge.
+
+Runtime is a local `llama.cpp` server (Qwen3-4B) on an RTX 4050 via Vulkan,
+with an in-process CPU fallback and a rules-only path if no model is up. Nothing
+leaves the machine.
+
+---
+
+---
+
 ## 6. Data Pipeline & Robustness  ·  `backend/data_loader.py`
 
 - **Sources:** Yahoo Finance (prices) and FRED (macro), cached as CSV so the app
@@ -329,10 +401,12 @@ tests to complement ADF, and a pytest suite around the analytic checks.
 ## 11. How to Run
 
 ```bash
-# Backend
-python -m venv .venv && source .venv/bin/activate
+# Backend — main.py uses flat imports, so it is served with --app-dir
 pip install -r backend/requirements.txt
-python -m uvicorn backend.main:app --reload --port 8000     # → localhost:8000/docs
+python -m uvicorn main:app --app-dir backend --port 8000     # → localhost:8000/docs
+
+# Local AI, optional but recommended
+llama-server.exe -m <Qwen3-4B gguf> -ngl 99 -c 4096 --port 8080
 
 # Frontend
 cd frontend && npm install && npm run dev                    # → localhost:5173

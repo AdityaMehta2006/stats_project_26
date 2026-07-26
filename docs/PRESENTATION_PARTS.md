@@ -25,7 +25,8 @@ high-level). Everything else is balanced around those.
    DBnomics backup; our FastAPI backend; the local AI API.
 4. **Pillar — GARCH & Volatility Clustering** — modelling time-varying risk;
    evidence of clustering and fat tails via Ljung-Box and Jarque-Bera
-   *(sample: persistence ≈ 0.9955, excess kurtosis ≈ 16)*.
+   *(sample: persistence ≈ 0.994 over 2,905 days, excess kurtosis ≈ 15.8,
+   Jarque-Bera p ≈ 0)*.
 5. **Valuation lens** — "is a stock bloated / overpriced?" via fundamental ratios
    (P/E, P/B, PEG) vs the stock's history and peers — flagging "priced for
    perfection" vs "on sale".
@@ -35,13 +36,17 @@ high-level). Everything else is balanced around those.
 ## Part 2 — Jitvan — Macro & the Engine
 
 **Topics covered**
-1. **Pillar — Macro Factor & Lag Regression** — OLS with lagged macro factors and
-   Granger causality: which forces move an asset and with what delay
-   *(sample: S&P 500 macro R² ≈ 0.64)*.
-2. **The recommendation engine** — "statistics detect, the AI explains"; how
-   detectors rank opportunities by severity with a confidence score.
-3. **Pilot status & modules built** — validated data pipeline (corrupted cache
-   found and fixed; ranges sanity-checked) and the working backend + dashboard.
+1. **Pillar — Macro Factor & Lag Regression** — OLS with *standardized* lagged
+   macro factors and Granger causality: which forces move an asset and with what
+   delay *(sample: S&P 500 R² ≈ 0.69; 6 of 32 Granger tests significant)*.
+2. **The decision engine** — "statistics detect, the AI explains". Seven
+   detectors normalized onto one bull/bear axis, then **fused**: weight =
+   severity × statistical reliability, giving a direction (`tilt`) and a
+   `conviction` that *falls* when signals disagree — with risk kept on a
+   separate axis and dissent shown rather than averaged away.
+3. **Pilot status & modules built** — the working backend + dashboard, and the
+   data-validation finding worth telling: `yfinance` is **not thread-safe**,
+   which is what had been silently swapping one ticker's data for another.
 
 ---
 
@@ -49,14 +54,17 @@ high-level). Everything else is balanced around those.
 
 **Topics covered**
 1. **Pillar — Forex Pair Trading** — cointegration across pairs, the spread and
-   z-score, mean-reversion signals and half-life
-   *(sample: USDCHF/USDJPY cointegrated, p ≈ 0.008)*.
-2. **Decision engine — rules-based vs LLM-based** — the trade-offs (determinism,
-   explainability, speed, flexibility) and our hybrid approach with a toggle.
+   z-score on **log prices**, mean-reversion signals and half-life
+   *(sample: USDCHF/USDJPY cointegrated, p = 0.0075, half-life ≈ 69 days)*.
+2. **Rules vs LLM** — the trade-offs (determinism, explainability, speed,
+   flexibility) and why we landed on "rules decide, the model explains": the
+   model's stance is shown *beside* the computed one so it may disagree
+   visibly, and every number it writes is checked against the evidence we gave it.
 3. **Future directions** — **options analysis via Black–Scholes** *(keep
-   high-level: the idea is to gauge whether options look expensive or cheap versus
-   our volatility model — no formula needed)*; plus a few more opportunity lenses;
-   brief closing.
+   high-level: the idea is to gauge whether options look expensive or cheap
+   versus our volatility model — the module and endpoint are built; wiring it
+   in as a detector is next)*; the statistical-rigor work (multiple-testing
+   correction, HAC errors, out-of-sample validation); brief closing.
 
 ---
 

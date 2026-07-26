@@ -142,3 +142,72 @@ def chat(system: str, user: str, max_tokens: int = 320, temperature: float = 0.3
         print(f"[llm_client] generation failed ({prov}): {e}")
         return None
     return None
+
+
+def chat_stream(system: str, user: str, max_tokens: int = 320,
+                temperature: float = 0.3, timeout: int = 180):
+    """
+    Yield reply fragments as the model produces them.
+
+    Same contract as chat(), but incremental — the caller can paint the first
+    words in a few hundred milliseconds instead of waiting for the full reply.
+    Yields nothing if no provider is up; callers fall back to the rules summary.
+    """
+    prov = _effective_provider()
+    body = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+    try:
+        if prov == "openai":
+            import json
+            import requests
+            headers = {"Content-Type": "application/json"}
+            if LLM_API_KEY:
+                headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+            with requests.post(
+                f"{LLM_BASE_URL.rstrip('/')}/chat/completions",
+                headers=headers, json=body, timeout=timeout, stream=True,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines(decode_unicode=True):
+                    # OpenAI-compatible SSE: "data: {...}" frames, "data: [DONE]" last.
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        return
+                    try:
+                        delta = json.loads(payload)["choices"][0].get("delta", {})
+                    except (ValueError, KeyError, IndexError):
+                        continue  # keep-alive or malformed frame
+                    if delta.get("content"):
+                        yield delta["content"]
+            return
+
+        if prov == "local":
+            for chunk in _get_local().create_chat_completion(
+                messages=body["messages"], max_tokens=max_tokens,
+                temperature=temperature, stream=True,
+            ):
+                delta = chunk["choices"][0].get("delta", {})
+                if delta.get("content"):
+                    yield delta["content"]
+            return
+    except Exception as e:  # noqa: BLE001 — a dead model must not break the request
+        print(f"[llm_client] stream failed ({prov}): {e}")
+        return
+
+
+def prewarm() -> bool:
+    """
+    Fire one tiny generation so the first real request doesn't pay model load
+    and prompt-cache warmup. Returns whether the model answered.
+    """
+    return chat("Reply with OK.", "OK?", max_tokens=4, timeout=30) is not None

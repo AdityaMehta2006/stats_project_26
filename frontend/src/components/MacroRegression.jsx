@@ -6,21 +6,22 @@
  * correlation heatmap, and macro time series.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, Cell, Legend
+  ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell, Legend
 } from "recharts";
 import useApiData from "../hooks/useApiData";
+import { useTicker } from "../ticker";
 import { getMacroOLS, getMacroGranger, getMacroHeatmap, getMacroTimeSeries } from "../api";
-import { LoadingState, ErrorState } from "./common/StatusStates";
+import { ErrorState, StatsSkeleton, ChartSkeleton } from "./common/StatusStates";
 import TickerSearch from "./common/TickerSearch";
 import Icon from "./common/Icon";
 import { InfoTip, LabelWithTip } from "./common/Tooltip";
 import TimeRangeFilter from "./common/TimeRangeFilter";
 import { filterByRange, axisInterval, MONTHLY_RANGES } from "../timeRange";
-import { CHART, SERIES, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
+import { CHART, SERIES, divergingFill, tooltipStyle, tooltipLabelStyle, tooltipItemStyle } from "../theme";
 import { fmtPval, fmtBeta, fmtZ } from "../utils/format";
 
 const container = {
@@ -33,18 +34,23 @@ const item = {
 };
 
 export default function MacroRegression() {
-  const [ticker, setTicker] = useState("^GSPC");
+  const { ticker, setTicker } = useTicker();
 
-  const ols = useApiData(() => getMacroOLS(ticker), [ticker]);
-  const granger = useApiData(() => getMacroGranger(ticker), [ticker]);
-  const heatmap = useApiData(() => getMacroHeatmap(ticker), [ticker]);
-  const ts = useApiData(() => getMacroTimeSeries(ticker), [ticker]);
+  const ols = useApiData(() => getMacroOLS(ticker), [ticker], "macro-ols");
+  const granger = useApiData(() => getMacroGranger(ticker), [ticker], "macro-granger");
+  const heatmap = useApiData(() => getMacroHeatmap(ticker), [ticker], "macro-heatmap");
+  const ts = useApiData(() => getMacroTimeSeries(ticker), [ticker], "macro-ts");
 
   const loading = ols.loading || granger.loading || heatmap.loading || ts.loading;
   const error = ols.error || granger.error || heatmap.error || ts.error;
 
+  const hasData = Boolean(ols.data || granger.data || heatmap.data || ts.data);
+  const firstLoad = loading && !hasData;
+  const refetching = loading && hasData;
+
   return (
-    <motion.div variants={container} initial="hidden" animate="show">
+    <motion.div variants={container} initial="hidden" animate="show"
+      className={refetching ? "is-refetching" : undefined}>
       <motion.div className="section-header" variants={item}>
         <div className="section-ico macro"><Icon name="trendingUp" size={24} /></div>
         <div>
@@ -69,10 +75,18 @@ export default function MacroRegression() {
         <TickerSearch value={ticker} onSelect={setTicker} label="Analyze Ticker" />
       </motion.div>
 
-      {loading && <LoadingState message={`Running regressions for ${ticker}…`} subtext="OLS, Granger causality & correlation analysis" />}
-      {error && !loading && <ErrorState message={error} onRetry={() => { ols.reload(); granger.reload(); heatmap.reload(); ts.reload(); }} />}
+      {firstLoad && (
+        <>
+          <StatsSkeleton boxes={4} />
+          <div className="charts-grid">
+            <ChartSkeleton />
+            <ChartSkeleton />
+          </div>
+        </>
+      )}
+      {error && !firstLoad && <ErrorState message={error} onRetry={() => { ols.reload(); granger.reload(); heatmap.reload(); ts.reload(); }} />}
 
-      {!loading && !error && (
+      {!firstLoad && !error && (
         <>
           {ols.data && (
             <motion.div className="stats-grid" variants={item}>
@@ -132,12 +146,14 @@ export default function MacroRegression() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={ols.data.lag_comparison}>
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis dataKey="max_lag" stroke={CHART.axis} tick={{ fontSize: 12 }} label={{ value: "Max Lag (months)", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 12 }} />
-                      <YAxis stroke={CHART.axis} tick={{ fontSize: 12 }} />
-                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "rgba(148,163,184,0.06)" }} />
-                      <Legend />
-                      <Bar dataKey="r_squared" name="R²" fill={CHART.teal} radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="adj_r_squared" name="Adj. R²" fill={CHART.cyan} radius={[4, 4, 0, 0]} />
+                      <XAxis dataKey="max_lag" stroke={CHART.axis} tick={{ fontSize: 12 }} label={{ value: "Max Lag (months)", position: "bottom", offset: -2, fill: CHART.axis, fontSize: 12 }}  minTickGap={24} tickMargin={8} height={52} />
+                      <YAxis stroke={CHART.axis} tick={{ fontSize: 12 }}  tickMargin={6} />
+                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={{ fill: "var(--surface-sunk)" }} />
+                      {/* Legend to the top: at the default bottom placement it
+                          sat on top of the "Max Lag (months)" axis label. */}
+                      <Legend verticalAlign="top" height={30} />
+                      <Bar dataKey="r_squared" name="R²" fill={SERIES[0]} radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="adj_r_squared" name="Adj. R²" fill={SERIES[4]} radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -191,7 +207,7 @@ export default function MacroRegression() {
                           <td>{r.f_stat}</td>
                           <td className={r.significant ? "significant" : "not-significant"}>{r.p_value}</td>
                           <td>
-                            <span className={`badge ${r.significant ? "success" : "danger"}`}>
+                            <span className={`badge ${r.significant ? "success" : "muted"}`}>
                               {r.significant ? "Significant" : "Not Sig."}
                             </span>
                           </td>
@@ -231,12 +247,12 @@ export default function MacroRegression() {
                         <tr key={i}>
                           <td style={{ color: "var(--text-muted)" }}>{i + 1}</td>
                           <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>{r.variable}</td>
-                          <td style={{ color: r.coefficient > 0 ? CHART.teal : CHART.down, fontFamily: "var(--font-mono)" }}>
+                          <td style={{ color: r.coefficient > 0 ? CHART.up : CHART.down, fontFamily: "var(--font-mono)" }}>
                             {fmtBeta(r.coefficient)}
                           </td>
                           <td style={{ fontFamily: "var(--font-mono)" }}>{fmtPval(r.p_value)}</td>
                           <td>
-                            <span className={`badge ${r.significant ? "success" : "danger"}`}>
+                            <span className={`badge ${r.significant ? "success" : "muted"}`}>
                               {r.significant ? "Yes" : "No"}
                             </span>
                           </td>
@@ -304,36 +320,56 @@ export default function MacroRegression() {
                   <div>
                     <div className="card-title">
                       OLS Regression Coefficients
-                      <InfoTip text="The estimated effect of each factor on returns. Teal bars are statistically significant (p < 0.05); grey bars are not distinguishable from zero." />
+                      <InfoTip text="The estimated effect of each factor on returns, per one standard-deviation move. Bars point right for a positive effect and left for a negative one; faded bars are not statistically significant (p ≥ 0.05), meaning they are not distinguishable from zero." />
                     </div>
                     <div className="card-subtitle">Full model with lags for {ticker}</div>
                   </div>
                 </div>
-                <div className="chart-container tall">
+                <div className="chart-container xtall">
                   <ResponsiveContainer width="100%" height="100%">
+                    {/* margin.left AND YAxis width both reserved space for the
+                        category labels, so the plot was pushed 230px right and
+                        the bars no longer lined up with their labels. The axis
+                        width alone does the job. */}
                     <BarChart
                       data={ols.data.coefficients.filter(c => c.variable !== "const")}
                       layout="vertical"
-                      margin={{ left: 120, right: 30 }}
+                      margin={{ top: 4, right: 24, bottom: 4, left: 8 }}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-                      <XAxis type="number" stroke={CHART.axis} tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="variable" stroke={CHART.axis} tick={{ fontSize: 10 }} width={110} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
+                      <XAxis type="number" stroke={CHART.axis} tick={{ fontSize: 11 }} minTickGap={24} tickMargin={8} />
+                      <YAxis
+                        type="category"
+                        dataKey="variable"
+                        stroke={CHART.axis}
+                        tick={{ fontSize: 10 }}
+                        width={132}
+                        tickMargin={6}
+                        interval={0}
+                      />
+                      {/* Coefficients are signed, so zero is the reference. */}
+                      <ReferenceLine x={0} stroke={CHART.axis} />
                       <Tooltip
                         contentStyle={tooltipStyle}
                         labelStyle={tooltipLabelStyle}
                         itemStyle={tooltipItemStyle}
-                        cursor={{ fill: "rgba(148,163,184,0.06)" }}
+                        cursor={{ fill: "var(--surface-sunk)" }}
                         formatter={(val, name, props) => [
                           `${fmtBeta(val)} (p=${fmtPval(props.payload.p_value)})`,
                           "Std. Beta",
                         ]}
                       />
                       <Bar dataKey="coefficient" radius={[0, 4, 4, 0]}>
+                        {/* Sign is direction, so it earns the hue. Significance
+                            is not a direction, so it rides opacity instead. */}
                         {ols.data.coefficients
                           .filter(c => c.variable !== "const")
                           .map((entry, idx) => (
-                            <Cell key={idx} fill={entry.significant ? CHART.teal : "#3A4658"} />
+                            <Cell
+                              key={idx}
+                              fill={entry.coefficient >= 0 ? CHART.up : CHART.down}
+                              fillOpacity={entry.significant ? 1 : 0.32}
+                            />
                           ))}
                       </Bar>
                     </BarChart>
@@ -370,13 +406,8 @@ function HeatmapChart({ data, factors, maxLag }) {
   const lags = Array.from({ length: maxLag + 1 }, (_, i) => i);
   const maxAbsCorr = Math.max(...data.map(d => Math.abs(d.correlation)), 0.01);
 
-  function getColor(val) {
-    const ratio = val / maxAbsCorr;
-    if (ratio >= 0) {
-      return `rgba(45, 212, 191, ${0.12 + Math.min(Math.abs(ratio), 1) * 0.6})`;
-    }
-    return `rgba(248, 113, 113, ${0.12 + Math.min(Math.abs(ratio), 1) * 0.6})`;
-  }
+  // Correlation has a sign, so it earns colour — the system's direction pair.
+  const getColor = (val) => divergingFill(val, maxAbsCorr);
 
   return (
     <div style={{ padding: "0.5rem 0" }}>
@@ -396,7 +427,7 @@ function HeatmapChart({ data, factors, maxLag }) {
               <div
                 key={lag}
                 className="heatmap-cell"
-                style={{ background: getColor(val), color: Math.abs(val) > maxAbsCorr * 0.5 ? "#06231f" : "var(--text-secondary)" }}
+                style={{ background: getColor(val), color: Math.abs(val) > maxAbsCorr * 0.5 ? "var(--ink)" : "var(--ink-secondary)" }}
                 title={`${factor} lag ${lag}: ${val}`}
               >
                 {val.toFixed(2)}
@@ -412,6 +443,7 @@ function HeatmapChart({ data, factors, maxLag }) {
 function MacroTimeSeriesChart({ data }) {
   const [selectedSeries, setSelectedSeries] = useState(["Equity_Return", "VIX"]);
   const [range, setRange] = useState("All");
+  const [scale, setScale] = useState("z");
   const columns = data.columns || [];
 
   const allDates = new Set();
@@ -420,7 +452,7 @@ function MacroTimeSeriesChart({ data }) {
   });
   const sortedDates = Array.from(allDates).sort();
 
-  const chartData = filterByRange(sortedDates.map(date => {
+  const rawData = filterByRange(sortedDates.map(date => {
     const row = { date };
     selectedSeries.forEach(col => {
       const point = (data.time_series[col] || []).find(d => d.date === date);
@@ -429,49 +461,131 @@ function MacroTimeSeriesChart({ data }) {
     return row;
   }), range);
 
+  /**
+   * These factors live on wildly different scales — VIX runs 15–40, Fed Funds
+   * 0–5, and equity returns hover around ±0.05. On one raw axis VIX owns the
+   * range and everything else is a flat line on zero, which is what made this
+   * chart useless for comparison.
+   *
+   * Standardising to z-scores puts every factor in the same unit (standard
+   * deviations from its own mean over the visible window), which is both
+   * comparable and the same transform the regression itself uses. Raw values
+   * stay one click away, and the tooltip always shows them.
+   */
+  const chartData = useMemo(() => {
+    if (scale === "raw") return rawData;
+    const stats = {};
+    selectedSeries.forEach(col => {
+      const vals = rawData.map(r => r[col]).filter(v => typeof v === "number");
+      if (!vals.length) return;
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || 1;
+      stats[col] = { mean, sd };
+    });
+    return rawData.map(row => {
+      const out = { date: row.date };
+      selectedSeries.forEach(col => {
+        if (typeof row[col] === "number" && stats[col]) {
+          out[col] = (row[col] - stats[col].mean) / stats[col].sd;
+          out[`${col}__raw`] = row[col];
+        }
+      });
+      return out;
+    });
+  }, [rawData, selectedSeries, scale]);
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {columns.map((col, i) => (
-          <button
-            key={col}
-            onClick={() => {
-              setSelectedSeries(prev =>
-                prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
-              );
-            }}
-            style={{
-              padding: "4px 12px",
-              borderRadius: 999,
-              border: `1px solid ${selectedSeries.includes(col) ? SERIES[i % SERIES.length] : "var(--border-subtle)"}`,
-              background: selectedSeries.includes(col) ? `${SERIES[i % SERIES.length]}22` : "transparent",
-              color: selectedSeries.includes(col) ? SERIES[i % SERIES.length] : "var(--text-muted)",
-              fontSize: "0.75rem",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {col}
-          </button>
-        ))}
+        {columns.map((col, i) => {
+          const on = selectedSeries.includes(col);
+          return (
+            <button
+              key={col}
+              className={`series-pill ${on ? "on" : ""}`}
+              onClick={() =>
+                setSelectedSeries(prev =>
+                  prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+                )
+              }
+            >
+              {/* The swatch carries the series' ramp step; the pill itself stays
+                  ink. Previously this interpolated `${SERIES[i]}22` for the
+                  background, which produced literal "var(--ramp-1)22" — not a
+                  colour at all once the palette moved to tokens. */}
+              <span
+                className="series-swatch"
+                style={{ background: on ? SERIES[(i * 3) % SERIES.length] : "var(--hairline)" }}
+              />
+              {col}
+            </button>
+          );
+        })}
         </div>
-        <div className="trf-wrap"><span className="trf-label">Range</span>
-          <TimeRangeFilter value={range} onChange={setRange} ranges={MONTHLY_RANGES} layoutId="macro-range" />
+        <div className="series-controls">
+          <div className="trf-wrap">
+            <span className="trf-label">Scale</span>
+            <div className="time-filter">
+              {[["z", "Standardised"], ["raw", "Raw"]].map(([v, label]) => (
+                <button
+                  key={v}
+                  className={`time-pill ${scale === v ? "active" : ""}`}
+                  onClick={() => setScale(v)}
+                >
+                  <span className="time-pill-label">{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="trf-wrap"><span className="trf-label">Range</span>
+            <TimeRangeFilter value={range} onChange={setRange} ranges={MONTHLY_RANGES} layoutId="macro-range" />
+          </div>
         </div>
       </div>
+
+      {scale === "z" && (
+        <p className="chart-note">
+          Each factor is shown in standard deviations from its own mean over the
+          visible window, so series on different scales can be compared. Switch to
+          Raw for actual units.
+        </p>
+      )}
       <div className="chart-container tall">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData}>
+          <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-            <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(chartData.length)} />
-            <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
-            <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
-            <Legend />
+            <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0, 7)} interval={axisInterval(chartData.length)} minTickGap={24} tickMargin={8} />
+            <YAxis
+              stroke={CHART.axis}
+              tick={{ fontSize: 11 }}
+              tickMargin={6}
+              width={52}
+              tickFormatter={(v) => (scale === "z" ? `${v > 0 ? "+" : ""}${v.toFixed(1)}σ` : v)}
+            />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              labelStyle={tooltipLabelStyle}
+              itemStyle={tooltipItemStyle}
+              formatter={(val, name, props) => {
+                const raw = props.payload?.[`${name}__raw`];
+                return scale === "z" && raw !== undefined
+                  ? [`${val >= 0 ? "+" : ""}${val.toFixed(2)}σ  (${raw})`, name]
+                  : [val, name];
+              }}
+            />
+            <Legend verticalAlign="top" height={30} iconType="plainline" />
+            {scale === "z" && <ReferenceLine y={0} stroke={CHART.axis} strokeDasharray="2 4" />}
             {selectedSeries.map((col) => (
-              <Line key={col} type="monotone" dataKey={col} stroke={SERIES[columns.indexOf(col) % SERIES.length]} dot={false} strokeWidth={1.6} />
+              <Line
+                key={col}
+                type="monotone"
+                dataKey={col}
+                stroke={SERIES[(columns.indexOf(col) * 3) % SERIES.length]}
+                dot={false}
+                strokeWidth={1.6}
+                isAnimationActive={false}
+              />
             ))}
           </LineChart>
         </ResponsiveContainer>

@@ -21,6 +21,12 @@ from data_loader import get_equity_data, build_equity_returns, get_treasury_10y_
 
 SQRT_252 = np.sqrt(252.0)
 
+# Implied/model vol ratio outside which the market's premium is worth calling
+# rich or cheap. Shared with recommender.detect_options_mispricing so the endpoint's
+# verdict and the engine's detector cannot drift apart.
+RICH_RATIO = 1.15
+CHEAP_RATIO = 0.85
+
 
 # ---------------------------------------------------------------------------
 # Core Black-Scholes-Merton math (pure functions, no data access)
@@ -167,6 +173,7 @@ def analyze_option(ticker: str = "^GSPC", strike: float = None,
         "model_price": round(price, 4),
         "greeks": greeks,
         "market": None,
+        "expiries": [],
     }
 
     # Optional: compare to a live option chain (only some tickers have one)
@@ -174,24 +181,38 @@ def analyze_option(ticker: str = "^GSPC", strike: float = None,
         import yfinance as yf
         tk = yf.Ticker(ticker)
         expiries = list(tk.options or [])
+        result["expiries"] = expiries[:12]
         if expiries:
-            use_exp = expiry if expiry in expiries else expiries[0]
+            # Nearest expiry to the horizon we were asked about. Taking
+            # expiries[0] instead meant a 30-day model price was compared to a
+            # contract expiring tomorrow, and the implied vol solved off it came
+            # back an order of magnitude low.
+            use_exp = expiry if expiry in expiries else min(
+                expiries,
+                key=lambda e: abs((date.fromisoformat(e) - date.today()).days - T * 365),
+            )
+            T_mkt = max((date.fromisoformat(use_exp) - date.today()).days, 1) / 365.0
             chain = tk.option_chain(use_exp)
             df = chain.calls if option == "call" else chain.puts
             row = df.iloc[(df["strike"] - K).abs().argmin()]
             mkt_price = float(row.get("lastPrice") or 0.0)
             mkt_iv = float(row.get("impliedVolatility") or 0.0)
-            our_iv = implied_vol(mkt_price, spot, float(row["strike"]), T, r, option) if mkt_price > 0 else None
+            # Solve at the traded contract's own horizon, not the requested one.
+            our_iv = implied_vol(mkt_price, spot, float(row["strike"]), T_mkt, r, option) if mkt_price > 0 else None
             verdict = None
             if mkt_iv > 0:
                 ratio = mkt_iv / sigma if sigma > 0 else None
                 if ratio:
-                    verdict = ("rich (implied >> model)" if ratio > 1.15
-                               else "cheap (implied << model)" if ratio < 0.85
+                    verdict = ("rich (implied >> model)" if ratio > RICH_RATIO
+                               else "cheap (implied << model)" if ratio < CHEAP_RATIO
                                else "fairly priced vs model")
             result["market"] = {
                 "expiry_used": use_exp,
+                "T_years": round(T_mkt, 4),
                 "nearest_strike": round(float(row["strike"]), 2),
+                "model_price_at_expiry": round(
+                    bs_price(spot, float(row["strike"]), T_mkt, r, sigma, option), 4
+                ),
                 "last_price": round(mkt_price, 4),
                 "market_implied_vol": round(mkt_iv, 4),
                 "our_implied_vol": round(our_iv, 4) if our_iv else None,
