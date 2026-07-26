@@ -95,8 +95,8 @@ POLARITY = {
     # call — there is no defensible sign for it, so it never moves tilt. It is
     # also deliberately absent from RISK_TYPES below: rich premium is a statement
     # about what the market charges for vol, not about realised risk.
-    ("vol_mispricing", "rich"): 0,
-    ("vol_mispricing", "cheap"): 0,
+    ("options_mispricing", "rich"): 0,
+    ("options_mispricing", "cheap"): 0,
 }
 
 # Types that describe risk rather than direction.
@@ -111,7 +111,7 @@ SOURCE = {
     "trend": "price",
     "breakout": "price",
     "relative_performance": "price",
-    "vol_mispricing": "options",
+    "options_mispricing": "options",
 }
 
 
@@ -230,7 +230,7 @@ def _reliability(d: dict) -> float:
         # GARCH fits on ~2700 daily observations — well identified.
         return 0.85
 
-    if t == "vol_mispricing":
+    if t == "options_mispricing":
         # A live market quote is real, but it is a single quote, and the vol it
         # is compared against is realised over a different horizon.
         return 0.6
@@ -325,6 +325,7 @@ def _scan_asset_cached(ticker: str, pairs: tuple, heavy: bool, asof: str) -> dic
     should cost a single signal, not the whole verdict.
     """
     from analysis import recommender as rec
+    from analysis.decision import decide
 
     raw, diagnostics = [], {}
 
@@ -345,7 +346,7 @@ def _scan_asset_cached(ticker: str, pairs: tuple, heavy: bool, asof: str) -> dic
         (rec.detect_pairs_opportunity, (pairs, best)) if best else None,
         # Fetches a live option chain, so it rides with the heavy tier rather
         # than adding network I/O to every asset in a broad sweep.
-        (rec.detect_vol_mispricing, (ticker,)) if heavy else None,
+        (rec.detect_options_mispricing, (ticker,)) if heavy else None,
         (rec.detect_trend, (ticker,)),
         (rec.detect_macro_dislocation, (ticker,)),
         (rec.detect_breakout, (ticker,)),
@@ -363,10 +364,22 @@ def _scan_asset_cached(ticker: str, pairs: tuple, heavy: bool, asof: str) -> dic
             diagnostics[fn.__name__] = str(e)
 
     signals = rank([to_signal(d, asof) for d in raw])
+
+    # The rules layer, run on the same raw detections. `fuse` answers "where does
+    # the evidence point and how firmly"; `decide` answers "so what size, and
+    # show the working". Both read the same signals, so they cannot disagree
+    # about the inputs — only about the question being asked.
+    try:
+        decision = decide(raw, ticker)
+    except Exception as e:  # noqa: BLE001 — a verdict without sizing still works
+        decision = None
+        diagnostics["decision"] = str(e)
+
     return {
         "asset": ticker,
         "asof": asof,
         "verdict": fuse(signals),
+        "decision": decision,
         "signals": [s.to_dict() for s in signals],
         "diagnostics": diagnostics,   # always present, so "no signal" is
                                       # distinguishable from "detector failed"

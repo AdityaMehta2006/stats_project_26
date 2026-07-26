@@ -51,11 +51,11 @@ export default function useApiData(fetcher, deps = [], key) {
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-    // `deps` is supplied by the caller, so it cannot be an array literal here.
-    // The lint rule is reporting its own inability to verify statically, not a
-    // defect: `fetcher` is deliberately excluded because callers pass a fresh
-    // arrow on every render, and including it would refetch in an endless loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo
+  // `deps` is supplied by the caller, so it cannot be an array literal here.
+  // The lint rule is reporting its own inability to verify statically, not a
+  // defect: `fetcher` is deliberately excluded because callers pass a fresh
+  // arrow on every render, and including it would refetch in an endless loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo
   }, deps);
 
   useEffect(() => {

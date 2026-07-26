@@ -38,6 +38,23 @@ const PATHS = {
       <path d="M12 3.5v17a8.5 8.5 0 000-17z" fill="currentColor" stroke="none" />
     </>
   ),
+  // Pillar: options pricing — payoff hockey-stick with strike marker
+  options: (
+    <>
+      <path d="M3 16h7l8-9" />
+      <path d="M10 16v4" />
+      <circle cx="18" cy="7" r="2" />
+      <path d="M3 20h18" />
+    </>
+  ),
+  // Pillar: stochastic processes — random walk with a mean-reversion band
+  stochastic: (
+    <>
+      <path d="M3 12l3-5 3 8 3-9 3 7 3-4 3 3" />
+      <path d="M3 5h18" strokeDasharray="2 3" />
+      <path d="M3 19h18" strokeDasharray="2 3" />
+    </>
+  ),
   // Pillar: pair trading — exchange / mean reversion
   exchange: (
     <>

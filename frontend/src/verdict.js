@@ -55,7 +55,7 @@ export const DETECTOR_TIPS = {
     "Price versus its recent high/low range. Flags a new extreme, or a squeeze where the range has narrowed without resolving yet.",
   relative_performance:
     "How this asset is doing against the rest of the scanned universe today.",
-  vol_mispricing:
+  options_mispricing:
     "Compares the volatility the option market is charging for with the volatility the asset has actually realised. It says premium is expensive or cheap — not which way price is going.",
 };
 

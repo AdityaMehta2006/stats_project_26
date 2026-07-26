@@ -56,8 +56,8 @@ ALL_DIRECTIONS = [
     ("breakout", "neutral"),
     ("relative_performance", "outperforming"),
     ("relative_performance", "underperforming"),
-    ("vol_mispricing", "rich"),
-    ("vol_mispricing", "cheap"),
+    ("options_mispricing", "rich"),
+    ("options_mispricing", "cheap"),
 ]
 
 
@@ -258,56 +258,73 @@ def test_guardrail_flags_invented_numbers():
 # Vol-mispricing detector
 # --------------------------------------------------------------------------
 
-def _detect_with_vols(iv, model_vol):
+def _detect_with_vols(iv, garch_vol, available=True):
     """
-    Run the detector against a stubbed option chain. Patched by hand rather than
-    with the monkeypatch fixture, because the __main__ runner below calls every
-    test with no arguments.
+    Run the detector against a stubbed option chain. The detector imports from
+    analysis.market_options *inside* the function, so patching the module
+    attributes here takes effect at call time.
+
+    Patched by hand rather than with the monkeypatch fixture, because the
+    __main__ runner below calls every test with no arguments.
     """
     from analysis import recommender as rec
+    from analysis import market_options as mo
 
-    real = rec.analyze_option
-    rec.analyze_option = lambda ticker: {
-        "market": {
-            "market_implied_vol": iv,
-            "model_volatility": model_vol,
+    ratio = (iv / garch_vol) if garch_vol else None
+    stubs = {
+        "get_spot": lambda t: 100.0,
+        "get_risk_free_rate": lambda: {"rate_cc": 0.04},
+        "get_dividend_yield": lambda t: {"q": 0.0},
+        "garch_vol_term_structure": lambda t, horizon_days=30: {"sigma_garch": garch_vol},
+        "_compare_to_chain": lambda *a, **k: {
+            "available": available,
+            "market_implied_vol_pct": iv * 100,
+            "model_forecast_vol_pct": garch_vol * 100,
+            "variance_risk_premium_pct": (iv - garch_vol) * 100,
+            "iv_to_model_ratio": ratio,
+            "days_to_expiry": 30,
             "expiry_used": "2026-08-21",
-        }
+            "nearest_strike": 100.0,
+        },
     }
+    real = {k: getattr(mo, k) for k in stubs}
+    for k, v in stubs.items():
+        setattr(mo, k, v)
     try:
-        return rec.detect_vol_mispricing("TEST")
+        return rec.detect_options_mispricing("TEST")
     finally:
-        rec.analyze_option = real
+        for k, v in real.items():
+            setattr(mo, k, v)
 
 
-def test_vol_mispricing_is_silent_inside_the_dead_band():
-    # Implied within ±15% of realised is not worth a signal.
+def test_options_mispricing_is_silent_inside_the_dead_band():
+    # Implied within ±15% of the GARCH forecast is not worth a signal.
     assert _detect_with_vols(0.25, 0.24) is None
     assert _detect_with_vols(0.24, 0.25) is None
 
 
-def test_vol_mispricing_reads_rich_and_cheap():
+def test_options_mispricing_reads_rich_and_cheap():
     rich = _detect_with_vols(0.40, 0.20)
     assert rich["direction"] == "rich"
-    assert rich["type"] == "vol_mispricing"
+    assert rich["type"] == "options_mispricing"
     assert 0.0 <= rich["severity"] <= 1.0
-    assert rich["evidence"]["iv_ratio"] == 2.0
+    assert rich["evidence"]["iv_to_model_ratio"] == 2.0
 
     cheap = _detect_with_vols(0.10, 0.20)
     assert cheap["direction"] == "cheap"
-    assert cheap["evidence"]["iv_ratio"] == 0.5
+    assert cheap["evidence"]["iv_to_model_ratio"] == 0.5
 
 
-def test_vol_mispricing_needs_a_chain():
-    # No chain, or a zero quote, must be silence rather than a divide by zero.
-    assert _detect_with_vols(0.0, 0.24) is None
+def test_options_mispricing_needs_a_chain():
+    # No chain, or a zero forecast, must be silence rather than a divide by zero.
+    assert _detect_with_vols(0.40, 0.20, available=False) is None
     assert _detect_with_vols(0.24, 0.0) is None
 
 
-def test_vol_mispricing_never_moves_the_verdict():
+def test_options_mispricing_never_moves_the_verdict():
     # Premium being expensive is not a directional call. It must leave tilt and
     # the risk axis alone, or the gauge starts lying.
-    signals = [sig("vol_mispricing", "rich", severity=1.0)]
+    signals = [sig("options_mispricing", "rich", severity=1.0)]
     v = fuse(signals)
     assert v["tilt"] == 0.0
     assert v["risk"] == 0.0

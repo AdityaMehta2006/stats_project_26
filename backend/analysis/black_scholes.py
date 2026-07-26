@@ -22,7 +22,7 @@ from data_loader import get_equity_data, build_equity_returns, get_treasury_10y_
 SQRT_252 = np.sqrt(252.0)
 
 # Implied/model vol ratio outside which the market's premium is worth calling
-# rich or cheap. Shared with recommender.detect_vol_mispricing so the endpoint's
+# rich or cheap. Shared with recommender.detect_options_mispricing so the endpoint's
 # verdict and the engine's detector cannot drift apart.
 RICH_RATIO = 1.15
 CHEAP_RATIO = 0.85

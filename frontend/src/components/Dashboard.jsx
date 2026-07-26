@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import Icon from "./common/Icon";
 
 /**
- * Overview as one bento grid: three pillars, the scale of the data, and what
+ * Overview as one bento grid: the five pillars, the scale of the data, and what
  * the app can be pointed at, all on a single set of hairlines. Cells vary in
  * span so the grid carries hierarchy on its own — no floating cards, no
  * nesting, no shadows.
@@ -33,13 +33,33 @@ const PILLARS = [
       "Currency pairs whose prices stay tethered over the long run. Builds the mean-reverting spread and generates z-score entries — statistical arbitrage in miniature.",
     tags: ["Cointegration", "Z-score", "Mean reversion"],
   },
+  {
+    id: "options",
+    icon: "options",
+    iconClass: "options",
+    title: "Options Pricing & Volatility Surface",
+    description:
+      "Prices options with Black-Scholes, Merton jump-diffusion and Heston stochastic volatility. The Options tab reads a live chain for Greeks and implied-versus-realised vol; the Pricing tab drives the same models on parameters you set, showing why Black-Scholes implies a flat volatility curve while real markets are skewed.",
+    tags: ["Black-Scholes", "Greeks", "Volatility Smile", "Implied Vol"],
+    nav: "options",
+  },
+  {
+    id: "stochastic",
+    icon: "stochastic",
+    iconClass: "stochastic",
+    title: "Stochastic Processes",
+    description:
+      "The differential equations underneath everything else: Brownian motion, geometric Brownian motion, Ornstein-Uhlenbeck (the process pair trading assumes), CIR and Heston — with numerical schemes and variance reduction compared against exact solutions.",
+    tags: ["Itô's Lemma", "SDEs", "Monte Carlo", "Euler vs Milstein"],
+    nav: "stochastic",
+  },
 ];
 
 const SCALE = [
-  { value: "3", label: "Analysis pillars" },
+  { value: "5", label: "Analysis pillars" },
+  { value: "13", label: "Detectors" },
   { value: "40+", label: "FX pairs" },
   { value: "10Y", label: "Daily history" },
-  { value: "7", label: "Detectors" },
 ];
 
 const SOURCES = [
@@ -58,7 +78,7 @@ export default function Dashboard({ onNavigate }) {
       <header className="panel-head">
         <h1>Quantitative anomalies in financial markets</h1>
         <p>
-          Three classic effects that break the assumptions of textbook finance —
+          Five classic effects that break the assumptions of textbook finance —
           modelled live in Python, fused into one read, and explained in plain
           English by a local model.
         </p>

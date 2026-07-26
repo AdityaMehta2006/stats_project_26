@@ -3,13 +3,31 @@ recommender.py
 --------------
 Anomaly & opportunity recommendation engine.
 
-Principle: STATS DETECT, LLM EXPLAINS. Deterministic detectors run over the
-existing pillars (GARCH volatility, return distribution, forex cointegration,
-price trend, macro dislocation, breakout, relative performance, options vol
-mispricing) and emit
-structured signals with a 0-1 severity. A rules-based summary is always
-produced; an optional local LLM turns the signals into a plain-English
-analyst note (it is given the numbers and must not invent any).
+Principle: STATS DETECT, RULES DECIDE, LLM EXPLAINS.
+
+Three strictly separated layers, which is the design's main claim:
+
+1. **Detection** (this module). Thirteen deterministic detectors run over the
+   pillars and emit structured signals `{type, asset, direction, severity 0-1,
+   evidence, note}`. Each answers one narrow question and knows nothing about
+   the others.
+
+     price/trend    : trend, breakout, momentum (12-1), relative_performance
+     mean reversion : mean_reversion (RSI + displacement), pairs_opportunity
+     volatility     : volatility_regime, tail_event, options_mispricing
+     macro          : macro_dislocation
+     flow / context : volume_anomaly, correlation_regime, seasonality
+
+2. **Decision** (`decision.py`). Nets the signals into a single stance,
+   conviction and position size — weighting by reliability, discounting
+   redundant signals, and flagging genuine conflict instead of averaging it
+   away. Fully deterministic and auditable.
+
+3. **Explanation** (`llm_client.py`, optional). The LLM receives the detections
+   and the decision as JSON and writes prose. It never computes, ranks, or
+   invents a number. That constraint is what makes a small local model
+   trustworthy here, and it means the system's actual output is unchanged
+   whether or not the LLM is available.
 """
 
 import json
@@ -20,7 +38,8 @@ from data_loader import get_equity_data, build_equity_returns
 from analysis.garch import fit_garch, get_return_distribution
 from analysis.pairs import get_best_pair_analysis
 from analysis.macro_regression import get_macro_diagnostics
-from analysis.black_scholes import analyze_option, RICH_RATIO, CHEAP_RATIO
+from analysis.decision import decide
+from analysis.black_scholes import RICH_RATIO, CHEAP_RATIO
 
 import llm_client
 
@@ -279,12 +298,12 @@ def detect_breakout(ticker: str) -> dict | None:
 
     if breakout_up_50:
         direction = "up"
-        label = f"50-day high breakout" + (" after squeeze" if squeezed else "")
+        label = "50-day high breakout" + (" after squeeze" if squeezed else "")
         severity = _clamp(0.55 + (0.2 if squeezed else 0))
         rec = "momentum signal — watch for follow-through"
     elif breakout_dn_50:
         direction = "down"
-        label = f"50-day low breakdown" + (" after squeeze" if squeezed else "")
+        label = "50-day low breakdown" + (" after squeeze" if squeezed else "")
         severity = _clamp(0.55 + (0.2 if squeezed else 0))
         rec = "breakdown — monitor support levels"
     elif squeezed and breakout_up_20:
@@ -386,55 +405,398 @@ def detect_relative_performance(ticker: str) -> dict | None:
     }
 
 
-def detect_vol_mispricing(ticker: str) -> dict | None:
+def detect_momentum(ticker: str) -> dict | None:
     """
-    Variance risk premium: the market's implied volatility against our own
-    realised-vol estimate. Rich premium favours selling it, cheap favours
-    buying it — a relative-value read, not a directional call.
+    Classic **12-1 month momentum**, risk-adjusted.
 
-    Silent when the ticker has no option chain, which is most of them.
+    Measures the trailing 12-month return but *skips the most recent month*
+    (hence "12-1"). The skip is not arbitrary: Jegadeesh & Titman (1993) found
+    the most recent month exhibits short-term *reversal*, which contaminates the
+    momentum signal, so the standard academic construction excludes it.
+
+    Dividing by realised volatility gives a Sharpe-like quantity, so a 30% gain
+    earned smoothly scores higher than the same gain earned through violent
+    swings. Momentum is among the most replicated anomalies in finance, which is
+    why its reliability weight is relatively high.
+    """
+    px = get_equity_data(ticker)["Close"].dropna()
+    if len(px) < 273:                       # 252 trading days + ~21 to skip
+        return None
+
+    p_now = float(px.iloc[-22])             # skip the last month
+    p_then = float(px.iloc[-274]) if len(px) >= 274 else float(px.iloc[0])
+    if p_then <= 0:
+        return None
+    ret_12_1 = (p_now / p_then - 1.0) * 100
+
+    rets = np.log(px / px.shift(1)).dropna()
+    ann_vol = float(rets.tail(252).std() * np.sqrt(252)) * 100
+    if ann_vol <= 0:
+        return None
+    risk_adj = ret_12_1 / ann_vol
+
+    if abs(risk_adj) < 0.4:
+        return None
+
+    direction = "positive" if risk_adj > 0 else "negative"
+    return {
+        "type": "momentum", "asset": ticker, "direction": direction,
+        "label": f"{direction.capitalize()} 12-1 momentum ({ret_12_1:+.1f}%, {risk_adj:+.2f} risk-adj)",
+        "severity": _clamp(0.3 + min(abs(risk_adj) / 2.0, 0.55)),
+        "recommendation": (
+            "momentum tailwind — trend-following favourable" if risk_adj > 0
+            else "momentum headwind — avoid fresh longs"
+        ),
+        "note": (
+            f"Trailing 12-month return excluding the most recent month is {ret_12_1:+.1f}%, "
+            f"or {risk_adj:+.2f} per unit of annualised volatility ({ann_vol:.1f}%). "
+            f"The skipped month avoids contamination by short-term reversal."
+        ),
+        "evidence": {
+            "return_12_1_pct": round(ret_12_1, 2),
+            "annualized_vol_pct": round(ann_vol, 2),
+            "risk_adjusted": round(risk_adj, 3),
+        },
+    }
+
+
+def detect_mean_reversion(ticker: str) -> dict | None:
+    """
+    Short-horizon stretch: **RSI(14)** combined with distance from the 20-day mean.
+
+    RSI = 100 - 100/(1 + RS), where RS is the ratio of average gains to average
+    losses over 14 days. Wilder's original smoothing is used (an exponential
+    recursion), not a simple average — the two differ noticeably and the simple
+    version is a common misimplementation.
+
+    Requiring *both* an RSI extreme and a multi-sigma displacement from the
+    20-day mean is deliberate: RSI alone fires constantly in a trending market
+    and is close to useless on its own, which is why its reliability weight here
+    is only 0.55.
+    """
+    px = get_equity_data(ticker)["Close"].dropna()
+    if len(px) < 60:
+        return None
+
+    delta = px.diff().dropna()
+    gain = delta.clip(lower=0.0)
+    loss = (-delta).clip(lower=0.0)
+    # Wilder smoothing == EMA with alpha = 1/period.
+    avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0.0, np.nan)
+    rsi_series = 100 - 100 / (1 + rs)
+    rsi = float(rsi_series.iloc[-1])
+    if not np.isfinite(rsi):
+        return None
+
+    ma20 = px.rolling(20).mean()
+    sd20 = px.rolling(20).std()
+    last = float(px.iloc[-1])
+    m, s = float(ma20.iloc[-1]), float(sd20.iloc[-1])
+    if s <= 0:
+        return None
+    stretch = (last - m) / s
+
+    oversold = rsi < 30 and stretch < -1.5
+    overbought = rsi > 70 and stretch > 1.5
+    if not (oversold or overbought):
+        return None
+
+    direction = "oversold" if oversold else "overbought"
+    extremity = (30 - rsi) / 30 if oversold else (rsi - 70) / 30
+    return {
+        "type": "mean_reversion", "asset": ticker, "direction": direction,
+        "label": f"{direction.capitalize()} — RSI {rsi:.1f}, {stretch:+.1f}σ from 20-day mean",
+        "severity": _clamp(0.3 + extremity * 0.35 + min(abs(stretch) / 6, 0.2)),
+        "recommendation": (
+            "possible bounce — mean-reversion candidate" if oversold
+            else "possible pullback — stretched to the upside"
+        ),
+        "note": (
+            f"RSI(14) is {rsi:.1f} ({'below 30' if oversold else 'above 70'}) and price is "
+            f"{stretch:+.1f} standard deviations from its 20-day mean. Both conditions are "
+            f"required because RSI alone fires persistently in trends."
+        ),
+        "evidence": {
+            "rsi_14": round(rsi, 2),
+            "stretch_sigma": round(stretch, 2),
+            "price": round(last, 2),
+            "ma20": round(m, 2),
+        },
+    }
+
+
+def detect_volume_anomaly(ticker: str) -> dict | None:
+    """
+    Unusual volume, interpreted through the direction of the accompanying move.
+
+    Volume alone is ambiguous — a spike says "something happened", not what. Read
+    together with the price change it becomes interpretable: heavy volume on a
+    rally suggests **accumulation** (buyers pressing), heavy volume on a decline
+    suggests **distribution** (sellers pressing). Volume with no price response
+    is flagged as a neutral spike rather than forced into a direction.
+
+    Compared against the 50-day median rather than the mean, because volume
+    distributions are strongly right-skewed and a single earnings day would drag
+    a mean average badly.
+    """
+    df = get_equity_data(ticker)
+    if "Volume" not in df.columns:
+        return None
+    vol = df["Volume"].dropna()
+    px = df["Close"].dropna()
+    if len(vol) < 60 or len(px) < 60:
+        return None
+
+    recent = float(vol.iloc[-1])
+    baseline = float(vol.iloc[-51:-1].median())
+    if baseline <= 0 or recent <= 0:
+        return None
+    ratio = recent / baseline
+    if ratio < 1.8:
+        return None
+
+    ret_1d = float(px.iloc[-1] / px.iloc[-2] - 1) * 100
+    if ret_1d > 0.5:
+        direction, label_word = "accumulation", "buying"
+    elif ret_1d < -0.5:
+        direction, label_word = "distribution", "selling"
+    else:
+        direction, label_word = "spike", "activity"
+
+    return {
+        "type": "volume_anomaly", "asset": ticker, "direction": direction,
+        "label": f"Volume {ratio:.1f}x normal on {ret_1d:+.1f}% move ({label_word})",
+        "severity": _clamp(0.25 + min((ratio - 1.8) / 3.0, 0.45)),
+        "recommendation": (
+            "institutional interest — confirms the move" if direction != "spike"
+            else "elevated activity without direction — watch for resolution"
+        ),
+        "note": (
+            f"Latest volume is {ratio:.1f}x its 50-day median while price moved "
+            f"{ret_1d:+.1f}%. Median is used because volume is right-skewed and a mean "
+            f"would be dragged by single events."
+        ),
+        "evidence": {
+            "volume_ratio": round(ratio, 2),
+            "latest_volume": int(recent),
+            "median_50d_volume": int(baseline),
+            "return_1d_pct": round(ret_1d, 2),
+        },
+    }
+
+
+def detect_seasonality(ticker: str) -> dict | None:
+    """
+    Calendar effect for the current month, tested rather than asserted.
+
+    Computes the historical mean return for this month of the year and runs a
+    **one-sample t-test** against zero. Only fires when p < 0.10 *and* at least 8
+    observations of that month exist.
+
+    The honesty caveat, which is stated in the signal's own note: testing 12
+    months means roughly one will look significant at the 10% level by pure
+    chance. Calendar anomalies are also the most heavily data-mined findings in
+    finance, and many famous ones ("sell in May") have weakened substantially
+    since publication. This is why `decision.py` assigns seasonality the lowest
+    reliability weight of any detector, 0.40 — it is included for completeness
+    and as a worked example of multiple-testing risk, not because it should drive
+    a decision.
+    """
+    from scipy import stats as sp_stats
+
+    px = get_equity_data(ticker)["Close"].dropna()
+    if len(px) < 750:                       # need ~3 years for any monthly power
+        return None
+
+    monthly = px.resample("ME").last()
+    rets = (np.log(monthly / monthly.shift(1)).dropna()) * 100
+    if len(rets) < 24:
+        return None
+
+    current_month = pd.Timestamp.today().month
+    this_month = rets[rets.index.month == current_month]
+    if len(this_month) < 8:
+        return None
+
+    mean_ret = float(this_month.mean())
+    overall_mean = float(rets.mean())
+    t_stat, p_val = sp_stats.ttest_1samp(this_month.values, 0.0)
+    if not np.isfinite(p_val) or p_val >= 0.10:
+        return None
+
+    month_name = pd.Timestamp(2000, current_month, 1).strftime("%B")
+    direction = "favorable" if mean_ret > 0 else "unfavorable"
+    win_rate = float((this_month > 0).mean() * 100)
+
+    return {
+        "type": "seasonality", "asset": ticker, "direction": direction,
+        "label": f"{month_name} historically {direction} ({mean_ret:+.2f}% avg, p={p_val:.3f})",
+        "severity": _clamp(0.2 + min(abs(mean_ret) / 6.0, 0.25) + (0.10 if p_val < 0.05 else 0)),
+        "recommendation": "weak calendar tilt — do not trade on this alone",
+        "note": (
+            f"{month_name} has averaged {mean_ret:+.2f}% across {len(this_month)} years "
+            f"(vs {overall_mean:+.2f}% for all months), win rate {win_rate:.0f}%, "
+            f"t={t_stat:+.2f}, p={p_val:.3f}. Caveat: testing all 12 months means about one "
+            f"will appear significant at the 10% level by chance alone, so this is weak "
+            f"evidence by construction."
+        ),
+        "evidence": {
+            "month": month_name,
+            "mean_return_pct": round(mean_ret, 3),
+            "all_month_mean_pct": round(overall_mean, 3),
+            "years_observed": int(len(this_month)),
+            "win_rate_pct": round(win_rate, 1),
+            "t_stat": round(float(t_stat), 3),
+            "p_value": round(float(p_val), 4),
+        },
+    }
+
+
+def detect_options_mispricing(ticker: str) -> dict | None:
+    """
+    **Variance risk premium**: the market's implied volatility versus our
+    GARCH-forecast volatility.
+
+    This is the detector that connects the options module to the recommender, and
+    it is the signal the project roadmap listed as the missing link between the
+    volatility pillar and a tradeable view.
+
+    Economics: implied volatility is what option buyers pay for future variance;
+    the GARCH forecast is what the data says that variance should be. The gap is
+    a **risk premium**, and it is persistently positive in index options — option
+    sellers get paid because they lose catastrophically in crashes. So a positive
+    gap is not automatically free money; it is compensation for a real exposure.
+    A negative gap is the more genuinely unusual state, implying hedges are cheap
+    relative to forecast risk.
+
+    Requires a listed option chain, so it silently declines to fire for indices
+    and FX pairs that have none on Yahoo.
     """
     try:
-        opt = analyze_option(ticker)
+        from analysis.market_options import garch_vol_term_structure, _compare_to_chain, \
+            get_spot, get_risk_free_rate, get_dividend_yield
     except Exception:
         return None
 
-    mkt = opt.get("market") or {}
-    iv = float(mkt.get("market_implied_vol") or 0.0)
-    model_vol = float(mkt.get("model_volatility") or 0.0)
-    if iv <= 0 or model_vol <= 0:
+    try:
+        spot = get_spot(ticker)
+        r = get_risk_free_rate()["rate_cc"]
+        q = get_dividend_yield(ticker)["q"]
+        vol_info = garch_vol_term_structure(ticker, horizon_days=30)
+        sigma = vol_info.get("sigma_garch")
+        if not sigma or sigma <= 0:
+            return None
+        cmp_ = _compare_to_chain(ticker, spot, round(spot, 2), 30 / 365.0, r, q,
+                                 sigma, "call", None)
+    except Exception:
         return None
 
-    ratio = iv / model_vol
+    if not cmp_ or not cmp_.get("available"):
+        return None
+    ratio = cmp_.get("iv_to_model_ratio")
+    vrp = cmp_.get("variance_risk_premium_pct")
+    if ratio is None or vrp is None:
+        return None
     if CHEAP_RATIO <= ratio <= RICH_RATIO:
         return None
 
-    if ratio > RICH_RATIO:
-        direction = "rich"
-        severity = _clamp(0.35 + (ratio - RICH_RATIO) / 0.5 * 0.65)
-        label = f"{ticker} options rich — implied vol {ratio:.2f}× realised"
-        recommendation = "sell premium / prefer spreads"
-    else:
-        direction = "cheap"
-        severity = _clamp(0.35 + (CHEAP_RATIO - ratio) / CHEAP_RATIO * 0.65)
-        label = f"{ticker} options cheap — implied vol {ratio:.2f}× realised"
-        recommendation = "buy premium"
-
+    rich = ratio > RICH_RATIO
+    direction = "rich" if rich else "cheap"
     return {
-        "type": "vol_mispricing", "asset": ticker, "direction": direction,
-        "label": label,
-        "severity": severity,
-        "recommendation": recommendation,
+        "type": "options_mispricing", "asset": ticker, "direction": direction,
+        "label": (
+            f"Options {direction} — IV {cmp_['market_implied_vol_pct']:.1f}% vs "
+            f"GARCH forecast {cmp_['model_forecast_vol_pct']:.1f}%"
+        ),
+        "severity": _clamp(0.3 + min(abs(ratio - 1.0) / 1.0, 0.5)),
+        "recommendation": (
+            "premium-selling favourable, but crash exposure is the price" if rich
+            else "hedges look cheap versus forecast risk — consider protection"
+        ),
         "note": (
-            f"The {mkt.get('expiry_used')} chain implies {iv*100:.1f}% annualized volatility "
-            f"against {model_vol*100:.1f}% realised over the past year — a ratio of {ratio:.2f}. "
-            f"Option premium looks {direction} relative to how much {ticker} has actually moved."
+            f"Market implied volatility is {cmp_['market_implied_vol_pct']:.1f}% against a "
+            f"GARCH forecast of {cmp_['model_forecast_vol_pct']:.1f}% for the same maturity "
+            f"({cmp_['days_to_expiry']} days) — a variance risk premium of {vrp:+.1f} "
+            f"points, ratio {ratio:.2f}. A positive premium is normal and compensates "
+            f"sellers for crash risk; a negative one means protection is unusually cheap."
         ),
         "evidence": {
-            "implied_vol_pct": round(iv * 100, 1),
-            "realised_vol_pct": round(model_vol * 100, 1),
-            "iv_ratio": round(ratio, 2),
-            "expiry_used": mkt.get("expiry_used"),
+            "market_implied_vol_pct": cmp_["market_implied_vol_pct"],
+            "garch_forecast_vol_pct": cmp_["model_forecast_vol_pct"],
+            "variance_risk_premium_pct": vrp,
+            "iv_to_model_ratio": ratio,
+            "expiry": cmp_["expiry_used"],
+            "strike": cmp_["nearest_strike"],
+        },
+    }
+
+
+def detect_correlation_regime(ticker: str, pairs=None) -> dict | None:
+    """
+    Correlation-regime shift: is this asset's relationship with the market
+    breaking down?
+
+    Compares a 60-day rolling correlation against the S&P 500 with its own
+    2-year history. A large move in either direction is informative context:
+
+      * **Decoupling** (correlation collapsing) means the asset is trading on
+        idiosyncratic news, so market-level analysis explains less of it and
+        diversification is temporarily better than usual.
+      * **Converging** (correlation spiking) is the classic stress signature —
+        in a crisis everything correlates to 1 and diversification evaporates
+        exactly when it is needed.
+
+    Classified as `neutral` in the decision layer because it changes *how much to
+    trust other signals* rather than giving a direction of its own.
+    """
+    if ticker in ("^GSPC", "SPY", "SPX"):
+        return None
+    try:
+        bench = build_equity_returns("^GSPC")
+        asset = build_equity_returns(ticker)
+    except Exception:
+        return None
+
+    combined = pd.DataFrame({"a": asset, "b": bench}).dropna()
+    if len(combined) < 300:
+        return None
+
+    roll = combined["a"].rolling(60).corr(combined["b"]).dropna()
+    if len(roll) < 250:
+        return None
+    current = float(roll.iloc[-1])
+    hist = roll.iloc[-504:-1] if len(roll) > 504 else roll.iloc[:-1]
+    mean_c, sd_c = float(hist.mean()), float(hist.std())
+    if sd_c <= 0:
+        return None
+    z = (current - mean_c) / sd_c
+    if abs(z) < 2.0:
+        return None
+
+    direction = "converging" if z > 0 else "decoupling"
+    return {
+        "type": "correlation_regime", "asset": ticker, "direction": direction,
+        "label": f"Correlation to S&P {direction} ({current:+.2f} vs {mean_c:+.2f} normal, {z:+.1f}σ)",
+        "severity": _clamp(0.25 + min((abs(z) - 2.0) / 3.0, 0.35)),
+        "recommendation": (
+            "correlations rising — diversification weakening, treat market signals as more binding"
+            if z > 0 else
+            "trading on idiosyncratic news — market-level analysis explains less right now"
+        ),
+        "note": (
+            f"60-day correlation with the S&P 500 is {current:+.2f} against a 2-year average of "
+            f"{mean_c:+.2f} (σ={sd_c:.2f}), a {z:+.1f}σ shift. "
+            + ("Rising correlation is the classic stress signature — diversification fails "
+               "precisely when it is most needed." if z > 0 else
+               "Falling correlation means asset-specific drivers dominate.")
+        ),
+        "evidence": {
+            "current_correlation": round(current, 4),
+            "historical_mean": round(mean_c, 4),
+            "historical_std": round(sd_c, 4),
+            "z_score": round(z, 2),
         },
     }
 
@@ -453,25 +815,45 @@ def _rules_summary(ticker: str, signals: list) -> str:
     return f"{len(signals)} signal(s) for {ticker}: " + " ".join(parts)
 
 
-def _llm_narrative(ticker: str, signals: list) -> str | None:
+def _llm_narrative(ticker: str, signals: list, decision_payload: dict | None = None) -> str | None:
+    """
+    Ask the local model to narrate the detections *and* the rule-based decision.
+
+    The model is given the decision as a fact to explain, not a question to
+    answer. It cannot change the stance, the conviction or the size — those are
+    already fixed by `decision.py`. This keeps the division of labour strict: the
+    rules are accountable for what the system recommends, the LLM only for how
+    readably it is described.
+    """
     if not signals or not llm_client.available():
         return None
     payload = [
         {k: s[k] for k in ("type", "asset", "direction", "label", "severity", "evidence")}
         for s in signals
     ]
+    decision_summary = None
+    if decision_payload:
+        decision_summary = {
+            k: decision_payload.get(k) for k in
+            ("stance", "action", "conviction", "position_size_pct", "net_score",
+             "conflict_ratio", "independent_families", "rationale")
+        }
     system = (
-        "You are a precise quant analyst. You are given DETECTED signals with their numbers. "
-        "Write a brief markdown note (3-5 sentences). Use ONLY the numbers provided — never invent "
-        "figures, prices, or dates. Be concrete and cite the evidence. End with one cautious, "
-        "non-prescriptive 'what to watch'. No disclaimers, no preamble."
+        "You are a precise quant analyst. You are given DETECTED signals with their numbers "
+        "and a DECISION already computed by a deterministic rule engine. "
+        "Write a brief markdown note (4-6 sentences) explaining the detections and why they "
+        "support that decision. Use ONLY the numbers provided — never invent figures, prices, "
+        "or dates, and never change the stance, conviction or position size. If the engine "
+        "flagged a conflict, say so plainly. End with one cautious, non-prescriptive "
+        "'what to watch'. No disclaimers, no preamble."
     )
     user = (
         f"Asset focus: {ticker}\n"
         f"Detected signals (JSON):\n{json.dumps(payload, indent=2)}\n\n"
+        f"Rule-engine decision (JSON):\n{json.dumps(decision_summary, indent=2)}\n\n"
         "Write the analyst note."
     )
-    return llm_client.chat(system, user, max_tokens=300, temperature=0.3)
+    return llm_client.chat(system, user, max_tokens=420, temperature=0.3)
 
 
 def generate_recommendations(ticker: str = "^GSPC", pairs=None, use_llm: bool = False) -> dict:
@@ -503,6 +885,12 @@ def generate_recommendations(ticker: str = "^GSPC", pairs=None, use_llm: bool = 
         (detect_macro_dislocation, (ticker,)),
         (detect_breakout, (ticker,)),
         (detect_relative_performance, (ticker,)),
+        (detect_momentum, (ticker,)),
+        (detect_mean_reversion, (ticker,)),
+        (detect_volume_anomaly, (ticker,)),
+        (detect_seasonality, (ticker,)),
+        (detect_correlation_regime, (ticker, pairs)),
+        (detect_options_mispricing, (ticker,)),
     ]
 
     for entry in detector_calls:
@@ -524,12 +912,28 @@ def generate_recommendations(ticker: str = "^GSPC", pairs=None, use_llm: bool = 
         2,
     )
 
+    # The current volatility percentile feeds the decision layer's risk overlay,
+    # scaling position size down in high-volatility regimes.
+    vol_pct = None
+    if garch:
+        vols = [p["volatility"] for p in garch.get("conditional_volatility", [])]
+        if len(vols) >= 30:
+            arr = np.array(vols, dtype=float)
+            vol_pct = float((arr < arr[-1]).mean())
+
+    # Rule-based decision: net the signals into a stance, conviction and size.
+    decision_payload = decide(signals, ticker=ticker, vol_percentile=vol_pct)
+
     top = signals[0]["label"] if signals else "No notable anomalies"
     result = {
         "ticker": ticker,
         "pairs": list(pairs) if pairs else None,
         "signals": signals,
         "overall": {"headline": top, "confidence": confidence},
+        "decision": decision_payload,
+        "volatility_percentile": round(vol_pct, 4) if vol_pct is not None else None,
+        "detectors_run": len([e for e in detector_calls if e is not None]),
+        "detectors_fired": len(signals),
         "rules_summary": _rules_summary(ticker, signals),
         "llm_narrative": None,
         "mode": "rules",
@@ -539,7 +943,7 @@ def generate_recommendations(ticker: str = "^GSPC", pairs=None, use_llm: bool = 
         result["diagnostics"] = diagnostics
 
     if use_llm:
-        narrative = _llm_narrative(ticker, signals)
+        narrative = _llm_narrative(ticker, signals, decision_payload)
         if narrative:
             result["llm_narrative"] = narrative
             result["mode"] = "llm"

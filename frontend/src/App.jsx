@@ -7,6 +7,8 @@ import GarchVolatility from "./components/GarchVolatility";
 import PairTrading from "./components/PairTrading";
 import Options from "./components/Options";
 import Recommendations from "./components/Recommendations";
+import OptionsPricing from "./components/OptionsPricing";
+import StochasticModels from "./components/StochasticModels";
 import Icon from "./components/common/Icon";
 import BgPattern from "./components/common/BgPattern";
 import { InfoTip } from "./components/common/Tooltip";
@@ -38,7 +40,13 @@ const TABS = [
   { id: "macro",         label: "Macro",           icon: "trendingUp" },
   { id: "garch",         label: "GARCH",           icon: "activity" },
   { id: "pairs",         label: "Pairs",           icon: "exchange" },
+  // "options" reads a live chain (Greeks, implied-vs-realised) and is the
+  // drill-down target for the engine's options signals — verdict.js SOURCE_TAB
+  // points here, so the id must stay "options". "pricing" is the model zoo on
+  // synthetic parameters; they answer different questions and both stay.
   { id: "options",       label: "Options",         icon: "contract" },
+  { id: "pricing",       label: "Pricing",         icon: "options" },
+  { id: "stochastic",    label: "Stochastic",      icon: "stochastic" },
 ];
 
 /**
@@ -91,11 +99,13 @@ function Shell() {
             status={status.data}
           />
         );
-      case "macro":  return <MacroRegression />;
-      case "garch":  return <GarchVolatility />;
-      case "pairs":  return <PairTrading />;
-      case "options": return <Options />;
-      default:       return <Dashboard onNavigate={setActiveTab} />;
+      case "macro":      return <MacroRegression />;
+      case "garch":      return <GarchVolatility />;
+      case "pairs":      return <PairTrading />;
+      case "options":    return <Options />;
+      case "pricing":    return <OptionsPricing />;
+      case "stochastic": return <StochasticModels />;
+      default:           return <Dashboard onNavigate={setActiveTab} />;
     }
   };
 

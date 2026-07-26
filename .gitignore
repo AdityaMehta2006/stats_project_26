@@ -87,6 +87,9 @@ lerna-debug.log*
 .continue/
 .mcp.json
 
+# Personal study notes — private learning material, not part of the deliverable
+local/
+
 # OS / editor files
 .DS_Store
 Thumbs.db
