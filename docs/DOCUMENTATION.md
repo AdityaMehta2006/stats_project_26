@@ -31,19 +31,25 @@ The three anomalies, as opportunities:
 
 ## 2. What the Project Does
 
-A full-stack web application with seven areas:
+A full-stack web application with eight tabs:
 
 1. **Overview** — what the project is and how to navigate it.
-2. **Opportunities** — the recommendation engine: 13 detectors feeding a
-   rule-based decision layer that produces a stance, conviction and position
-   size, with an optional AI analyst note.
+2. **Opportunities** — 13 detectors feeding a rule-based decision layer that
+   produces a stance, conviction and position size, with an optional AI note.
 3. **Macro Regression** — which macro forces drive an asset, and with what lag.
 4. **GARCH Volatility** — how risk changes over time, and how fat the tails are.
 5. **Pair Trading** — cointegrated forex pairs and mean-reversion signals.
-6. **Options Pricing** — Black-Scholes, jump-diffusion and stochastic volatility
-   priced on live market inputs, plus the implied-volatility smile.
-7. **Stochastic Processes** — the SDEs underneath the other pillars, with
+6. **Options** — a live option chain: Greeks, and market implied volatility
+   against **realised** volatility. Backed by `black_scholes.py`.
+7. **Pricing** — the model zoo on chosen or market-derived parameters:
+   Black-Scholes, jump-diffusion, stochastic volatility, and the implied-
+   volatility smile. Backed by `advanced_options.py` + `market_options.py`.
+8. **Stochastic Processes** — the SDEs underneath the other pillars, with
    convergence and variance-reduction studies.
+
+Tabs 6 and 7 answer different questions and both are kept: **Options** is what
+the market is charging right now; **Pricing** is what the models say and how they
+compare.
 
 Everything is **dynamic**: the user can type any ticker (stock, index, crypto,
 future) or pick any combination of 45 forex pairs, and the analysis regenerates.
@@ -54,7 +60,7 @@ future) or pick any combination of 45 forex pairs, and the analysis regenerates.
 
 ```
             ┌─────────────────────────────┐
-            │   React + Vite frontend     │   7 tabs, Recharts, framer-motion
+            │   React + Vite frontend     │   8 tabs, Recharts, framer-motion
             │   (quant-terminal UI)       │   time filters, info tooltips
             └──────────────┬──────────────┘
                            │  HTTP (JSON) — 38 endpoints
@@ -151,9 +157,22 @@ process, and its half-life reproduces Pillar 3's independently derived value.
 ---
 
 ## 5. The Decision Layer — "stats detect, rules decide, LLM explains"
-`backend/analysis/recommender.py` · `decision.py` · `backend/llm_client.py`
+`backend/analysis/recommender.py` · `engine.py` · `decision.py` · `llm_client.py`
 
 Three strictly separated layers, which is the design's main claim.
+
+> **Note — the verdict is produced by two composed layers, not one.**
+> `engine.py` normalises the detectors' differing direction vocabularies onto a
+> single bull/bear axis via a `POLARITY` map, then **fuses** them into a `tilt`
+> and a `conviction` using a saturating evidence term. `decision.py` runs on the
+> *same* raw detections and answers a different question: redundancy discounting
+> within signal families, conflict demotion, a risk overlay, and a **position
+> size** with a written audit trail. `engine.scan_asset()` calls both and returns
+> them together as `verdict` and `decision`, so they cannot disagree about their
+> inputs — only about the question being asked. `engine.py` additionally provides
+> the multi-ticker universe scan, tiered caching, and `unverified_numbers()`,
+> which programmatically checks that generated narration cites only figures
+> present in the source data.
 
 **1. Detection** — 13 deterministic detectors emit signals with a 0–1 severity:
 
@@ -384,8 +403,14 @@ Stated deliberately, since they bound what the project currently claims:
 7. **Heston is seeded from GARCH rather than calibrated to option prices.** This
    is intentional — calibrating to prices would make the variance-risk-premium
    comparison circular — but it means the model smile is a prediction, not a fit.
-8. **No unit-test suite.** Validation is via the in-response checks in §6b, which
-   are real and visible but are not a test suite.
+8. **Test coverage is uneven.** `engine.py` has a pytest suite
+   (`backend/test_engine.py`) covering its polarity map, fusion mathematics and
+   detector dead bands. The newer modules (`advanced_options.py`,
+   `stochastic.py`, `decision.py`) rely instead on the checks in §6b, computed at
+   request time and returned in the API response — real validation, visible in
+   the UI, but not under pytest.
+
+9. **Two overlapping fusion layers** (`engine.py` and `decision.py`) — see §5.
 
 ---
 

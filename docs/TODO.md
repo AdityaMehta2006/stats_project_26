@@ -455,4 +455,7 @@ inference underneath. Detail in "Still open (next)" at the bottom.
   replacing the single 10Y; live per-currency rates for Garman-Kohlhagen.
 - **P2 — KPSS and structural-break tests** to complement ADF, whose power is weak
   against the near-unit-root persistence our spread exhibits.
-- **P2 — A pytest suite** around the analytic checks that currently run inline.
+- **P2 — Extend pytest coverage.** `test_engine.py` covers `engine.py`; the newer
+  modules (`advanced_options.py`, `stochastic.py`, `decision.py`) validate in-response
+  but are not under pytest.
+
